@@ -4,10 +4,12 @@ import codecs
 import networkx as nx
 import math
 import re
-import pyodbc
+#import pyodbc
 import numpy as np
 import json
 import os
+import torch
+from transformers import AutoTokenizer, AutoModelForMaskedLM
 from datetime import datetime
 from datetime import timedelta
 from sklearn.feature_extraction.text import TfidfVectorizer  # if not work try: ""pip uninstall scipy"" and then ""pip install scipy""
@@ -27,6 +29,66 @@ import clr    # install this library by this command : pip install pythonnet   (
 #clr.AddReference('{}\\FastTokenizer.dll'.format(os.getcwd()))
 clr.AddReference('{}\\FastTokenizer.dll'.format(os.getcwd()))
 from FastTokenizer import Api 
+
+# Choose model: 'HooshvareLab/bert-fa-base-uncased' or 'bert-base-multilingual-cased'
+LM_MODEL_NAME = 'HooshvareLab/bert-fa-base-uncased'
+lm_scorer = None
+
+class LanguageModelScorer:
+    def __init__(self, model_name='HooshvareLab/bert-fa-base-uncased'):
+        print(f"Loading tokenizer for {model_name}...")
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        print(f"Loading model {model_name}...")
+        self.model = AutoModelForMaskedLM.from_pretrained(model_name)
+        self.model.eval()
+        print("Model loaded.")
+
+    def get_score(self, text):
+        if not text:
+            return 0.0
+
+        # Tokenize the input text
+        tokenized_text = self.tokenizer.tokenize(text)
+        if not tokenized_text:
+            return 0.0
+
+        indexed_tokens = self.tokenizer.convert_tokens_to_ids(tokenized_text)
+
+        total_log_prob = 0
+
+        # Iterate through each token to calculate pseudo-log-likelihood
+        for i in range(len(tokenized_text)):
+            # Create a copy of the tokenized text and mask the current token
+            temp_tokenized_text = tokenized_text.copy()
+            temp_tokenized_text[i] = self.tokenizer.mask_token
+
+            # Convert tokens to IDs
+            masked_tokens_ids = self.tokenizer.convert_tokens_to_ids(temp_tokenized_text)
+            tokens_tensor_masked = torch.tensor([masked_tokens_ids])
+
+            # Get model predictions
+            with torch.no_grad():
+                outputs = self.model(tokens_tensor_masked)
+                predictions = outputs[0]
+
+            # Get the log probability of the original token at the masked position
+            log_probs = torch.nn.functional.log_softmax(predictions[0, i], dim=0)
+            token_log_prob = log_probs[indexed_tokens[i]].item()
+
+            total_log_prob += token_log_prob
+
+        # Normalize by length and convert back from log space
+        avg_log_prob = total_log_prob / len(tokenized_text)
+        score = math.exp(avg_log_prob)
+
+        return score
+
+def initialize_lm_scorer():
+    global lm_scorer
+    if lm_scorer is None:
+        print(f"Initializing language model: {LM_MODEL_NAME}...")
+        lm_scorer = LanguageModelScorer(LM_MODEL_NAME)
+        print("Language model initialized.")
 
 global nof
 nof = 1
@@ -70,578 +132,26 @@ WikiPediaBuffer = Buffering()
 #============================================================================
 
 
-def Stickiness(segment,flag):
-# Flag Can Be pmi or scp 
-    if len(segment)==0:
-        print('ERROR in Stikiness Calculation: Segment bayad hadde aghal 1 kalame bashad')
-        return 0
+def Stickiness(segment, flag):
+    if not segment:
+        print('ERROR in Stickiness Calculation: Segment cannot be empty')
+        return 0.0
+    
+    segment_text = " ".join(segment)
+    
+    # Get score from language model
+    # This score replaces both n-gram (c) and Wikipedia (Q) scores.
+    C = lm_scorer.get_score(segment_text)
+    
+    # The original paper's length normalization
+    if len(segment) == 1:
+        l = 1.0
     else:
-        if flag=='pmi':
-            #c = PMI(segment)       #use Exact Formulla in Article
-            c = PMISimple(segment)  #use Simple Formulla  
-        else:
-            #c = SCP(segment)        #use Exact Formulla in Article
-            c = SCPSimple(segment)   #use Simple Formulla
-            
-        #c: Chasbandegi bedoone dar nazar gereftane wikipedia
-
-        C = c * math.pow(math.e,Q(segment))  
-        #C: Ba dakhil kardane wikipedia
+        l = (len(segment) - 1) / len(segment)
         
-        if len(segment) == 1:
-            l = 1#1/3
-        else:
-            l = (len(segment) - 1)/len(segment) 
-        # l: Parametre Normal sazi tool (formul 12 dar maghale)
-        
-        L = l * C
-        
-        return L ###########################################################################################################################################
-
-
-
-def PMISimple(sg1):
-#    #Calculate C By PMI Simple Formulla:
-#    if len(sg1) == 1:
-#        tempp = SimplePr(sg1)
-#        c = tempp/(1+tempp)
-#    else:
-#        m=0
-#        for i in range(len(sg1)-1):
-#            m += SimplePr(sg1[0:i+1])*SimplePr(sg1[i+1:])
-#        Makhraj=m/(len(sg1)-1)
-#        Soorat = SimplePr(sg1)
-#
-#        if (Soorat + Makhraj) == 0 :      
-#            c = 1
-#        else: 
-#            c = Soorat/(Soorat+Makhraj)        
-#    return c 
-
-    #Calculate C By PMI Simple Formulla By Count rather than Probability:
-    N = 99603396 # this is Sum([Count]) OneGram
-    if len(sg1) == 1:
-        tempp = NgramCount(sg1)
-        c = tempp/(N+tempp)
-    else:
-        m=0
-        for i in range(len(sg1)-1):
-            m += NgramCount(sg1[0:i+1])*NgramCount(sg1[i+1:])
-        Makhraj=m/(len(sg1)-1)
-        Soorat = NgramCount(sg1) * N
-
-        if (Soorat + Makhraj) == 0 :      
-            c = 1
-        else: 
-            c = Soorat/(Soorat+Makhraj)        
-    return c       
-
-
-def SCPSimple(sg2):######### Sade saziye in formool hattman barresi shavad ke ghalat nabashad
-#    #Calculate C By SCP Simple Formulla:
-#    if len(sg2) == 1:         ##### in ghesmat hatman chek shavad
-#        tempp = math.pow(SimplePr(sg2),2)
-#        c = (2*tempp)/(tempp+1)
-#    else:
-#        m=0
-#        for i in range(len(sg2)-1):
-#            m += SimplePr(sg2[0:i+1])*SimplePr(sg2[i+1:])
-#        Makhraj=m/(len(sg2)-1)
-#        Soorat = math.pow(Pr(sg2),2)
-#
-#        if (Soorat + Makhraj) == 0 :   
-#            c = 2 ##########################
-#        else: 
-#            c = (2*Soorat)/(Soorat+Makhraj)        
-#    return c
+    L = l * C
     
-    #Calculate C By SCP Simple Formulla By Count rather than Probability:
-    N = 99603396 # this is Sum([Count]) OneGram
-    if len(sg2) == 1:     ##### in gheesmat hatttman chek shavad
-        tempp = NgramCount(sg2)
-        c = 2*math.pow(tempp,2)/(math.pow(tempp,2)+math.pow(N,2))
-    else:
-        m=0
-        for i in range(len(sg2)-1):
-            m += NgramCount(sg2[0:i+1])*NgramCount(sg2[i+1:])
-        Makhraj=m/(len(sg2)-1)
-        Soorat = math.pow(NgramCount(sg2),2)
-
-        if (Soorat + Makhraj) == 0 :      
-            c = 2 #############################
-        else: 
-            c = (2*Soorat)/(Soorat+Makhraj)       
-    return c       
-
-def PMI(sg1):
-    #Calculate C By PMI (Exact formula in Article)
-    if len(sg1) == 1:
-        tempp = Pr(sg1)
-        if tempp == 0:
-            PMI = 0
-        else:
-            PMI = math.log(tempp,math.e)
-    else:
-        m=0
-        for i in range(len(sg1)-1):
-            m += Pr(sg1[0:i+1])*Pr(sg1[i+1:])
-        M=m/(len(sg1))
-        Prr = Pr(sg1)
-        if Prr == 0  :
-            PMI = -math.inf
-        elif M == 0 and Prr != 0:
-            PMI = math.inf
-        else: 
-            PMI = math.log((Prr/M),math.e)
-     
-    c = (1/(1+math.pow(math.e,-PMI)))  
-    return c               
-
-def SCP(sg2):
-    if len(sg2) == 1:
-        tempp = Pr(sg2)
-        if tempp == 0:
-            SCP = 0
-        else:
-            SCP = 2*math.log(tempp,math.e)
-    else:
-        m=0
-        for i in range(len(sg2)-1):
-            m += Pr(sg2[0:i+1])*Pr(sg2[i+1:])
-        M=m/(len(sg2)-1)
-        Prr = Pr(sg2)
-
-        if M == 0 or Prr == 0:
-            SCP = 0
-        else: 
-            SCP = math.log((math.pow(Prr,2)/M),math.e)
-    
-    c = 2/(1+math.pow(math.e,-SCP))
-    return c
-    
-
-def NgramCount(sg3):
-    # Count Segment in Ngram
-    #
-    global NgramBuffer
-
-    global nof
-    
-    Res = NgramBuffer.ValueInBuffer(sg3)
-    
-    if Res == -1:
-    
-        query = CreateQueryForExtractNGram_Count(sg3)
-
-        if query == 'EmptySegment':
-            Res = 0
-        elif query == 'Above5Segment':
-            Res = 0
-        else:
-            global c
-        
-            try:
-                c.execute(query)
-                NGRAM = c.fetchall()[0][0]
-                nof += 1
-            except:
-                print('One Excepo Accureeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-                NGRAM = 0
-            
-            if NGRAM == None:
-                NGRAM = 0
-            Res = NGRAM
-        NgramBuffer.AddToBuffer(sg3,Res)
-    
-    return Res
-
-
-def SimplePr(sg3):
-    # Ehtemale vogho dar Web N-Gram (N-Gram Probability hast yani ehtemalate sharti hast)
-    #
-    global NgramBuffer
-
-    global nof
-    
-    Res = NgramBuffer.ValueInBuffer(sg3)
-    
-    if Res == -1:
-    
-        query = CreateQueryForExtractNGram_SimplePr(sg3)
-
-        if query == 'EmptySegment':
-            Res = 0
-        elif query == 'Above5Segment':
-            Res = 0
-        else:
-            global c
-        
-            try:
-                c.execute(query)
-                NGRAM = c.fetchall()[0][0]
-                nof += 1
-            except:
-                print('One Excepo Accureeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-                NGRAM = 0
-            
-            if NGRAM == None:
-                NGRAM = 0
-            Res = NGRAM
-        NgramBuffer.AddToBuffer(sg3,Res)
-    
-    return Res
-
-
-def Pr(sg3):
-    # Ehtemale vogho dar Web N-Gram (N-Gram Probability hast yani ehtemalate sharti hast)
-    #
-    global NgramBuffer
-
-    global nof
-    
-    Res = NgramBuffer.ValueInBuffer(sg3)
-    
-    if Res == -1:
-    
-        query = CreateQueryForExtractNGram(sg3)
-
-        if query == 'EmptySegment':
-            Res = 0
-        elif query == 'Above5Segment':
-            Res = 0
-        else:
-            global c
-        
-            try:
-                c.execute(query)
-                NGRAM = c.fetchall()[0][0]
-                nof += 1
-            except:
-                print('One Excepo Accureeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-                NGRAM = 0
-            
-            if NGRAM == None:
-                NGRAM = 0
-            Res = NGRAM
-        NgramBuffer.AddToBuffer(sg3,Res)
-    
-    return Res
-
-def CreateQueryForExtractNGram(SEG):
-    if type(SEG) == str:
-        SEG = FastTokenize(SEG)
-    Ngram = len(SEG)
-    
-    #for i in range(Ngram):
-        #SEG[i] = unicode(SEG[i], "utf-8")    ######################################################################################################
-    
-    if Ngram == 0:
-        #reshte tohi amade va hich kalameii nayamade
-        #
-        print('!!!!!!!!!!!!!!!!!!!!Cant Calculate Pr of empty segment( Pr[W] where W = [] )')
-        query = 'EmptySegment'
-        #
-        #
-    elif Ngram == 1:
-        #1 kalame hast va 1-Gram bayad hesab shavad
-        #
-        query = """declare @ngr float;
-                    exec Extract1Gram N\'{}\', @ngram=@ngr output;
-                    SELECT @ngr as NGR """.format(SEG[0])
-        #
-        #
-    elif Ngram == 2:
-        #2 kalame hast va 2-Gram bayad hesab shavad
-        #
-        query = """declare @ngr float;
-                    exec Extract2Gram N\'{}\', N\'{}\', @ngram=@ngr output;
-                    SELECT @ngr as NGR """.format(SEG[0], SEG[1])
-        #
-        #
-    elif Ngram ==3:
-        #3 kalame hast va 3-Gram bayad hesab shavad
-        #
-        query = """declare @ngr float;
-                    exec Extract3Gram N\'{}\', N\'{}\', N\'{}\', @ngram=@ngr output;
-                    SELECT @ngr as NGR """.format(SEG[0], SEG[1], SEG[2])
-        #
-        #
-    elif Ngram ==4:
-        #4 kalame hast va 4-Gram bayad hesab shavad
-        #
-        query = """declare @ngr float;
-                    exec Extract4Gram N\'{}\', N\'{}\', N\'{}\', N\'{}\', @ngram=@ngr output;
-                    SELECT @ngr as NGR """.format(SEG[0], SEG[1], SEG[2], SEG[3])
-        #
-        #
-    elif Ngram ==5:
-        #5 kalame hast va 5-Gram bayad hesab shavad
-        #
-        query = """declare @ngr float;
-                    exec Extract5Gram N\'{}\', N\'{}\', N\'{}\', N\'{}\', N\'{}\', @ngram=@ngr output;
-                    SELECT @ngr as NGR """.format(SEG[0], SEG[1], SEG[2], SEG[3], SEG[4])
-        #
-        #
-    else:
-        #Bishtar az 6 kalame amade va nabayad in halat ettefagh bioftad
-        #
-        print('!!!!!!!!!!!!!!!!!!!!Cant Calculate Pr of a Segment with More Than 5 Word')
-        query = 'Above5Segment'
-        #
-        #
-    return query
-def CreateQueryForExtractNGram_SimplePr(SEG):
-    if type(SEG) == str:
-        SEG = FastTokenize(SEG)
-    Ngram = len(SEG)
-    
-    #for i in range(Ngram):
-        #SEG[i] = unicode(SEG[i], "utf-8")    ######################################################################################################
-    
-    if Ngram == 0:
-        #reshte tohi amade va hich kalameii nayamade
-        #
-        print('!!!!!!!!!!!!!!!!!!!!Cant Calculate Pr of empty segment( Pr[W] where W = [] )')
-        query = 'EmptySegment'
-        #
-        #
-    elif Ngram == 1:
-        #1 kalame hast va 1-Gram bayad hesab shavad
-        #
-        query = """declare @ngr float;
-                    exec Extract1GramSimpleProbability N\'{}\', @ngram=@ngr output;
-                    SELECT @ngr as NGR """.format(SEG[0])
-        #
-        #
-    elif Ngram == 2:
-        #2 kalame hast va 2-Gram bayad hesab shavad
-        #
-        query = """declare @ngr float;
-                    exec Extract2GramSimpleProbability N\'{}\', N\'{}\', @ngram=@ngr output;
-                    SELECT @ngr as NGR """.format(SEG[0], SEG[1])
-        #
-        #
-    elif Ngram ==3:
-        #3 kalame hast va 3-Gram bayad hesab shavad
-        #
-        query = """declare @ngr float;
-                    exec Extract3GramSimpleProbability N\'{}\', N\'{}\', N\'{}\', @ngram=@ngr output;
-                    SELECT @ngr as NGR """.format(SEG[0], SEG[1], SEG[2])
-        #
-        #
-    elif Ngram ==4:
-        #4 kalame hast va 4-Gram bayad hesab shavad
-        #
-        query = """declare @ngr float;
-                    exec Extract4GramSimpleProbability N\'{}\', N\'{}\', N\'{}\', N\'{}\', @ngram=@ngr output;
-                    SELECT @ngr as NGR """.format(SEG[0], SEG[1], SEG[2], SEG[3])
-        #
-        #
-    elif Ngram ==5:
-        #5 kalame hast va 5-Gram bayad hesab shavad
-        #
-        query = """declare @ngr float;
-                    exec Extract5GramSimpleProbability N\'{}\', N\'{}\', N\'{}\', N\'{}\', N\'{}\', @ngram=@ngr output;
-                    SELECT @ngr as NGR """.format(SEG[0], SEG[1], SEG[2], SEG[3], SEG[4])
-        #
-        #
-    else:
-        #Bishtar az 6 kalame amade va nabayad in halat ettefagh bioftad
-        #
-        print('!!!!!!!!!!!!!!!!!!!!Cant Calculate Pr of a Segment with More Than 5 Word')
-        query = 'Above5Segment'
-        #
-        #
-    return query
-def CreateQueryForExtractNGram_Count(SEG):
-    if type(SEG) == str:
-        SEG = FastTokenize(SEG)
-    Ngram = len(SEG)
-    
-    #for i in range(Ngram):
-        #SEG[i] = unicode(SEG[i], "utf-8")    ######################################################################################################
-    
-    if Ngram == 0:
-        #reshte tohi amade va hich kalameii nayamade
-        #
-        print('!!!!!!!!!!!!!!!!!!!!Cant Calculate Pr of empty segment( Pr[W] where W = [] )')
-        query = 'EmptySegment'
-        #
-        #
-    elif Ngram == 1:
-        #1 kalame hast va 1-Gram bayad hesab shavad
-        #
-        query = """declare @cnt float;
-                    exec Extract1GramCount N\'{}\', @ngramcount=@cnt output;
-                    SELECT @cnt as CNT """.format(SEG[0])
-        #
-        #
-    elif Ngram == 2:
-        #2 kalame hast va 2-Gram bayad hesab shavad
-        #
-        query = """declare @cnt float;
-                    exec Extract2GramCount N\'{}\', N\'{}\', @ngramcount=@cnt output;
-                    SELECT @cnt as CNT """.format(SEG[0], SEG[1])
-        #
-        #
-    elif Ngram ==3:
-        #3 kalame hast va 3-Gram bayad hesab shavad
-        #
-        query = """declare @cnt float;
-                    exec Extract3GramCount N\'{}\', N\'{}\', N\'{}\', @ngramcount=@cnt output;
-                    SELECT @cnt as CNT """.format(SEG[0], SEG[1], SEG[2])
-        #
-        #
-    elif Ngram ==4:
-        #4 kalame hast va 4-Gram bayad hesab shavad
-        #
-        query = """declare @cnt float;
-                    exec Extract4GramCount N\'{}\', N\'{}\', N\'{}\', N\'{}\', @ngramcount=@cnt output;
-                    SELECT @cnt as CNT """.format(SEG[0], SEG[1], SEG[2], SEG[3])
-        #
-        #
-    elif Ngram ==5:
-        #5 kalame hast va 5-Gram bayad hesab shavad
-        #
-        query = """declare @cnt float;
-                    exec Extract5GramCount N\'{}\', N\'{}\', N\'{}\', N\'{}\', N\'{}\', @ngramcount=@cnt output;
-                    SELECT @cnt as CNT """.format(SEG[0], SEG[1], SEG[2], SEG[3], SEG[4])
-        #
-        #
-    else:
-        #Bishtar az 6 kalame amade va nabayad in halat ettefagh bioftad
-        #
-        print('!!!!!!!!!!!!!!!!!!!!Cant Calculate Pr of a Segment with More Than 5 Word')
-        query = 'Above5Segment'
-        #
-        #
-    return query
-        
-def Q_Title(sg4):
-    # Ehtemale vogho dar Wikipedia titles
-    
-    global nof
-    
-    global WikiPediaBuffer
-
-    if type(sg4) == str:
-        sg4 = FastTokenize(sg4)
-    
-
-    Res = WikiPediaBuffer.ValueInBuffer(sg4)
-    if Res == -1:
-        segmentstringforQuery = ''
-        for i in range(10):
-            if(i<len(sg4)):
-                segmentstringforQuery = '{} N\'{}\','.format(segmentstringforQuery, sg4[i])
-            else:
-                segmentstringforQuery = '{} N\'\','.format(segmentstringforQuery)
-    
-    
-        query = """declare @output float;
-                    exec ExtractNameEntityContaining {} @output output;
-                    SELECT @output as NER""".format(segmentstringforQuery)
-    
-        global c
-
-        try:
-            c.execute(query)
-            NameEntityP = c.fetchall()[0][0]
-            nof += 1
-        except: # Zamani ke Query Shamele Emoji ya .... bashad error khahad dad
-            print('One Excepo Accureeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-            NameEntityP = 0
-        if NameEntityP == None:
-            NameEntityP = 0
-        Res = NameEntityP
-        
-        WikiPediaBuffer.AddToBuffer(sg4,Res)
-        
-    return Res
-    
-def Q_Anchor(sg4):
-    # Ehtemale vogho dar Wikipedia AncherDF
-    
-    global nof
-    
-    global WikiPediaBuffer
-
-    if type(sg4) == str:
-        sg4 = FastTokenize(sg4)
-    
-
-    Res = WikiPediaBuffer.ValueInBuffer(sg4)
-    if Res == -1:
-        segmentstringforQuery = ''
-        for i in range(10):
-            if(i<len(sg4)):
-                segmentstringforQuery = '{} N\'{}\','.format(segmentstringforQuery, sg4[i])
-            else:
-                segmentstringforQuery = '{} N\'\','.format(segmentstringforQuery)
-    
-    
-        query = """declare @output float;
-                    exec ExtractAnchorDFRatioContaining {} @output output;
-                    SELECT @output as AnchorDF_Ratio""".format(segmentstringforQuery)
-    
-        global c
-
-        try:
-            c.execute(query)
-            AncgerDFRatio = c.fetchall()[0][0]
-            nof += 1
-        except: # Zamani ke Query Shamele Emoji ya .... bashad error khahad dad
-            print('One Excepo Accureeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-            AncgerDFRatio = 0
-        if AncgerDFRatio == None:
-            AncgerDFRatio = 0
-        Res = AncgerDFRatio
-        
-        WikiPediaBuffer.AddToBuffer(sg4,Res)
-        
-    return Res
-
-def Q(sg4):
-    # Ehtemale vogho dar Wikipedia AncherDF
-    
-    global nof
-    
-    global WikiPediaBuffer
-
-    if type(sg4) == str:
-        sg4 = FastTokenize(sg4)
-    
-
-    Res = WikiPediaBuffer.ValueInBuffer(sg4)
-    if Res == -1:
-        segmentstringforQuery = ''
-        for i in range(10):
-            if(i<len(sg4)):
-                segmentstringforQuery = '{} N\'{}\','.format(segmentstringforQuery, sg4[i])
-            else:
-                segmentstringforQuery = '{} N\'\','.format(segmentstringforQuery)
-    
-    
-        query = """declare @output float;
-                    exec ExtractAnchorDFRatioContaining {} @output output;
-                    SELECT @output as AnchorDF_Ratio""".format(segmentstringforQuery)
-    
-        global c
-
-        try:
-            c.execute(query)
-            AncgerDFRatio = c.fetchall()[0][0]
-            nof += 1
-        except: # Zamani ke Query Shamele Emoji ya .... bashad error khahad dad
-            print('One Excepo Accureeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee')
-            AncgerDFRatio = 0
-        if AncgerDFRatio == None:
-            AncgerDFRatio = 0
-        Res = AncgerDFRatio
-        
-        WikiPediaBuffer.AddToBuffer(sg4,Res)
-        
-    return Res
+    return L
 
 
 
@@ -1685,13 +1195,9 @@ def EventSegmentClustering(SimilarityGraph,EventSegment,k,k_min):
     return EventSegment_Clusters,Noises
 
 def MiuS(EventSegment):
-    MiuS=0
-    EventSegment=EventSegment.split(" ")
-    for Segment in EventSegment:
-        TempMiuS = math.pow(math.e,Q(Segment))
-        MiuS = max(MiuS,TempMiuS)
-    return MiuS-1
-    
+    # The language model score is used as a direct replacement for the original MiuS calculation.
+    # The original implementation had a complex dependency on the Q function which queried a database.
+    return lm_scorer.get_score(EventSegment)
 
 def EventNewsWorthy_NLastWindow(CondidateEvents,SimilarityGraph,n):
     MiuE = []
@@ -1839,7 +1345,7 @@ def Top5Rank(Cluster):
     AllWord = []
     for i,Segment in enumerate(Cluster):
         #print('Segment:{}/{}'.format(i,len(Cluster)))
-        CurrentRank = math.pow(math.e,Q(Segment))
+        CurrentRank = lm_scorer.get_score(Segment)
         AllWordRank.append(CurrentRank)
         AllWord.append(Segment)
     
@@ -2315,48 +1821,24 @@ def SaveSystemResultTopic(Events,WindowNum,Path):
 
 print("Start Program")
 
-Path = r'D:\Univercity\Codes\PtwEvent\Window14_17'
+# The Path variable is now relative to the script's location.
+Path = '.'
 
-conn = pyodbc.connect('Driver={SQL Server Native Client 11.0};'
-                              'Server=(local);'
-                              'Database=NGram;'
-                              'Trusted_Connection=yes;'
-                         )      
-global c
-c = conn.cursor()
+# The database connection is no longer needed and has been removed.
+# global c
 
+# Initialize the language model scorer
+initialize_lm_scorer()
 
 
-
-
-
-
-'''
-#khandane Ettelaat PostHaye Telegram Az SQL
-StartTime = datetime(2017, 1,  1, 00, 00, 00)
-EndTime   = datetime(2017, 1, 31, 23, 59, 59)   ############datetime(2017, 1, 31, 23, 59, 59)################ ta 31 om bayad bashad
-
-
-
-
-AllData = ReadData(StartTime,EndTime)
-
-
-######AllData = WindowingLikeTwiner(AllData)
-
-
-np.save(Path+r'\AllData.npy',AllData)
-print('\n AllData Saved')
-#OR
-'''
+# The script now loads only the initial raw data.
 print('Loading AllData ...')
-tempNumpyArray=np.load(Path+r'\AllData.npy',allow_pickle=True)
+# Make sure the AllData.npy file is in the same directory as the script.
+tempNumpyArray=np.load(os.path.join(Path, 'AllData.npy'), allow_pickle=True)
 AllData = tempNumpyArray.tolist()
 
 
-
-
-#AllData Contain :
+# AllData Contain :
 #        Seq_Windowing,
 #        Posts_Windowing,
 #        Types_Windowing,
@@ -2366,76 +1848,43 @@ AllData = tempNumpyArray.tolist()
 #        WindowNum
 
 
+# The following sections are now uncommented to generate data on the fly,
+# instead of loading from pre-computed files.
 
-
-
-
-
-
-
-
-'''
 #Segment kardane post ha (Az SCP Estefade shode)
+print("Segmenting posts...")
 PostsSegments_Windowing = Segmentation(AllData[1])
 #AllData[1] Means the Posts in TimeWindowing
-
-np.save(Path+r'\PostsSegments_Windowing.npy',PostsSegments_Windowing)
+np.save(os.path.join(Path, 'PostsSegments_Windowing.npy'), PostsSegments_Windowing)
 print('\n PostsSegments_Windowing Saved')
-
-#OR
 '''
+#OR
 print('Loading PostsSegments_Windowing ...')
 tempNumpyArray=np.load(Path+r'\PostsSegments_Windowing.npy',allow_pickle=True)
 PostsSegments_Windowing = tempNumpyArray.tolist()
-
+'''
 
 ####If Load AllData(Not Only Window14-17) this two Line Should be execute
 #StepTime = timedelta(hours=12) # timedelta(days=1)
 #AllData,PostsSegments_Windowing = NewWindowing(AllData,PostsSegments_Windowing,StartTime,StepTime)
 
 
-
-
-
-
-
-
-
-
-
-
-'''
 #Detect Bursty Segment
+print("Detecting bursty segments...")
 EventSegment_Windowing,EventSegmentWeight_Windowing = DetectBursty(AllData,PostsSegments_Windowing)
 #EventSegment is TweetsBurstySegments
-
-np.save(Path+r'\EventSegment_Windowing.npy',EventSegment_Windowing)
+np.save(os.path.join(Path, 'EventSegment_Windowing.npy'), EventSegment_Windowing)
 print('\n EventSegment_Windowing Saved')
-np.save(Path+r'\EventSegmentWeight_Windowing.npy',EventSegmentWeight_Windowing)
+np.save(os.path.join(Path, 'EventSegmentWeight_Windowing.npy'), EventSegmentWeight_Windowing)
 print('\n EventSegmentWeight_Windowing Saved')
-#OR
 '''
+#OR
 print('Loading EventSegment ...')
 tempNumpyArray=np.load(Path+r'\EventSegment_Windowing.npy',allow_pickle=True)
 EventSegment_Windowing = tempNumpyArray.tolist()
 tempNumpyArray=np.load(Path+r'\EventSegmentWeight_Windowing.npy',allow_pickle=True)
 EventSegmentWeight_Windowing = tempNumpyArray.tolist()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+'''
 
 #
 #################################################################################################################
@@ -2453,19 +1902,15 @@ EventSegmentWeight_Windowing = tempNumpyArray.tolist()
 #################################################################################################################
 #
 
+# This part requires a StartTime variable which was defined in the commented out SQL block.
+# I will define it here.
+StartTime = datetime(2017, 1,  1, 00, 00, 00)
 
-
-
-
-
-
-
-
+print("Clustering event segments...")
 StepTime = timedelta(hours=4) # timedelta(days=1)
 SimilarityGraph = EventSegmentClustering_Similarity(AllData,EventSegment_Windowing,StartTime,StepTime)
 # Condedate Evente is clysters of segment in each time window
-
-np.save(Path+r'\SimilarityGraph.npy',SimilarityGraph)
+np.save(os.path.join(Path, 'SimilarityGraph.npy'), SimilarityGraph)
 print('\n SimilarityGraph Saved')
 '''
 #OR
@@ -2473,23 +1918,6 @@ print('Loading SimilarityGraph ...')
 tempNumpyArray=np.load(Path+r'\SimilarityGraph.npy',allow_pickle=True)
 SimilarityGraph = tempNumpyArray.tolist()
 '''
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 #
 #################################################################################################################
@@ -2504,38 +1932,17 @@ SimilarityGraph = tempNumpyArray.tolist()
 #
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 #############EvaluateAfterClusteringComplete
-'''
-print("Clustering Start")
+print("Clustering started...")
 CondidateEvents,NoiseS = EventSegmentClustering(SimilarityGraph,EventSegment_Windowing,15,6)      # CondidateEvents,KList,KMinList,S_Score = EventSegmentClusteringByParametrTunning(SimilarityGraph,EventSegment_Windowing)
-np.save(Path+r'\CondidateEvents.npy',CondidateEvents)
+np.save(os.path.join(Path, 'CondidateEvents.npy'), CondidateEvents)
 print('\n CondidateEvents Saved')
-
-#OR
 '''
+#OR
 print('Loading CondidateEvents ...')
 tempNumpyArray=np.load(Path+r'\CondidateEvents.npy',allow_pickle=True)
 CondidateEvents = tempNumpyArray.tolist()
-
+'''
 
 
 ##SaveToExcellK_value(Path+r'\KvalueBySiluhette.xls',KList,KMinList,S_Score,"Silh")   # if run Bt Parametr tuning in line 2519
@@ -2657,24 +2064,16 @@ CondidateEvents = tempNumpyArray.tolist()
 """##%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%55
 
 
-
-
-
-
-
-
-'''
+print("Calculating event newsworthiness...")
 MiuE = EventNewsWorthy(CondidateEvents,SimilarityGraph)
-
-np.save(Path+r'\MiuE.npy',MiuE)
+np.save(os.path.join(Path, 'MiuE.npy'), MiuE)
 print('\n MiuE Saved')
-
-#OR
 '''
+#OR
 print('Loading MiuE ...')
 tempNumpyArray=np.load(Path+r'\MiuE.npy',allow_pickle=True)
 MiuE = tempNumpyArray.tolist()
-
+'''
 
 
 #################################################################################################################
@@ -2687,30 +2086,16 @@ MiuE = tempNumpyArray.tolist()
 #################################################################################################################
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-'''
+print("Calculating highest newsworthiness...")
 MiuX = HighestNewsWorthy(MiuE,CondidateEvents)
-
-np.save(Path+r'\MiuX.npy',MiuX)
+np.save(os.path.join(Path, 'MiuX.npy'), MiuX)
 print('\n MiuX Saved')
-
-#OR
 '''
+#OR
 print('Loading MiuX ...')
 tempNumpyArray=np.load(Path+r'\MiuX.npy',allow_pickle=True)
 MiuX = tempNumpyArray.tolist()
-
+'''
 
 
 
@@ -2786,37 +2171,33 @@ MiuX = tempNumpyArray.tolist()
 
 #->>>>>>      AZ INJA BE BAD HATMAN ESME File Hayi Ke SAVE Mishe Cheack Shavad
 
-
-'''
+print("Detecting realistic events...")
 Tereshold = 15##################################################################################.5
 RealisticEvents = DetectRealisticEvents(MiuX,MiuE,Tereshold,CondidateEvents)
-
-np.save(Path+r'\RealisticEvents_tereshold15.npy',RealisticEvents)
+np.save(os.path.join(Path, 'RealisticEvents_tereshold15.npy'), RealisticEvents)
 print('\n RealisticEvents Saved')
-
-#OR
 '''
+#OR
 print('Loading RealisticEvents ...')
 tempNumpyArray=np.load(Path+r'\RealisticEvents_tereshold15.npy',allow_pickle=True)
 RealisticEvents = tempNumpyArray.tolist()
-
-
-
-
-
 '''
+
+
+
+
+print("Detecting top K realistic events...")
 Tereshold = 15
 K_Value = 5
 RealisticEventsTopK = DetectRealisticEventsTopK(MiuX,MiuE,K_Value,Tereshold,CondidateEvents)
-
-np.save(Path+r'\RealisticEvents_tereshold15_TopK5.npy',RealisticEventsTopK)
+np.save(os.path.join(Path, 'RealisticEvents_tereshold15_TopK5.npy'), RealisticEventsTopK)
 print('\n RealisticEventsTopK Saved')
-
 '''
 #OR
 print('Loading RealisticEventsTopK ...')
 tempNumpyArray=np.load(Path+r'\RealisticEvents_tereshold15_TopK5.npy',allow_pickle=True)
 RealisticEventsTopK = tempNumpyArray.tolist()
+'''
 
 
 
@@ -2839,29 +2220,16 @@ RealisticEventsTopK = tempNumpyArray.tolist()
 #################################################################################################################
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-'''
+print("Describing events...")
 TitleToDescribeEventsSTR = DescribeEvents(RealisticEvents)
-
-np.save(Path+r'\TitleToDescribeEventsSTR_tereshold15.npy',TitleToDescribeEventsSTR)
+np.save(os.path.join(Path, 'TitleToDescribeEventsSTR_tereshold15.npy'), TitleToDescribeEventsSTR)
 print('\n TitleToDescribeEvents Saved')
-
-#OR
 '''
+#OR
 print('Loading TitleToDescribeEventsSTR ...')
 tempNumpyArray=np.load(Path+r'\TitleToDescribeEventsSTR_tereshold15.npy',allow_pickle=True)
 TitleToDescribeEventsSTR = tempNumpyArray.tolist()
+'''
 
 
 
@@ -2884,37 +2252,35 @@ TitleToDescribeEventsSTR = tempNumpyArray.tolist()
 
 
 
-
-'''
+print("Detecting related documents...")
 RelatedDocuments,RelatedSequence = DetectRelatedDoc(AllData,PostsSegments_Windowing,RealisticEvents)
-np.save(Path+r'\RelatedDocuments_tereshold15.npy',RelatedDocuments)
+np.save(os.path.join(Path, 'RelatedDocuments_tereshold15.npy'), RelatedDocuments)
 print('\n RelatedDocuments Saved')
-np.save(Path+r'\RelatedSequence_tereshold15.npy',RelatedSequence)
+np.save(os.path.join(Path, 'RelatedSequence_tereshold15.npy'), RelatedSequence)
 print('\n RelatedSequence Saved')
-
-#OR
 '''
+#OR
 print('Loading RelatedDocuments ...')
 tempNumpyArray=np.load(Path+r'\RelatedDocuments_tereshold15.npy',allow_pickle=True)
 RelatedDocuments = tempNumpyArray.tolist()
 print('Loading RelatedSequence ...')
 tempNumpyArray=np.load(Path+r'\RelatedSequence_tereshold15.npy',allow_pickle=True)
 RelatedSequence = tempNumpyArray.tolist()
-
-
-
-
-
 '''
+
+
+
+
+print("Joining segments...")
 RelatedDocumentsString = JoinSegments(RelatedDocuments)
-np.save(Path+r'\RelatedDocumentsString_tereshold15.npy',RelatedDocumentsString)
+np.save(os.path.join(Path, 'RelatedDocumentsString_tereshold15.npy'), RelatedDocumentsString)
 print('\n RelatedDocumentsString Saved')
-
-#OR
 '''
+#OR
 print('Loading RelatedDocumentsString ...')
 tempNumpyArray=np.load(Path+r'\RelatedDocumentsString_tereshold15.npy',allow_pickle=True)
 RelatedDocumentsString = tempNumpyArray.tolist()
+'''
 
 
 
@@ -2928,7 +2294,7 @@ AllSequenceAndRelatedEvents = ReadyToWriteToExcell(AllData,EventNumberOfEachSequ
 
 
 
-SaveToExcel(Path+r'\ResultsToCompaire_Tereshold15.xls',AllData[0],AllSequenceAndRelatedEvents)
+SaveToExcel(os.path.join(Path, 'ResultsToCompaire_Tereshold15.xls'), AllData[0], AllSequenceAndRelatedEvents)
 
 
 WindowNum = [1,2,14,15,16,17,18,19,26,31,32,37,38,39,40]

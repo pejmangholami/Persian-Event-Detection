@@ -1,0 +1,9 @@
+numpy
+networkx
+scikit-learn
+xlwt
+pandas
+matplotlib
+pythonnet
+torch
+transformers
