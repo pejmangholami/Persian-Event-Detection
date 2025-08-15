@@ -3,6 +3,7 @@ networkx
 scikit-learn
 xlwt
 pandas
+xlrd
 matplotlib
 pythonnet
 torch

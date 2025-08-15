@@ -49,7 +49,7 @@ class LanguageModelScorer:
 
         # Tokenize the input text
         tokenized_text = self.tokenizer.tokenize(text)
-        if not tokenized_text:
+        if not tokenized_text or len(tokenized_text) == 0:
             return 0.0
 
         indexed_tokens = self.tokenizer.convert_tokens_to_ids(tokenized_text)
@@ -66,10 +66,10 @@ class LanguageModelScorer:
             masked_tokens_ids = self.tokenizer.convert_tokens_to_ids(temp_tokenized_text)
             tokens_tensor_masked = torch.tensor([masked_tokens_ids])
 
-            # Get model predictions
+            # Get model predictions by explicitly passing the input tensor as `input_ids`
             with torch.no_grad():
-                outputs = self.model(tokens_tensor_masked)
-                predictions = outputs[0]
+                outputs = self.model(input_ids=tokens_tensor_masked)
+                predictions = outputs.logits
 
             # Get the log probability of the original token at the masked position
             log_probs = torch.nn.functional.log_softmax(predictions[0, i], dim=0)
@@ -349,7 +349,7 @@ def DeleteDuplicate(S):
 def NoiseFilter(SegmentedSentence):
     # Input is a list like this: SS=[ ['W1'],['W2'],['W3' , 'W4'],['W5', 'W6', 'W7'],['W8', 'W9'], 5.1 ]
     SS_NoiseFiltered = []
-    Pattern = ('^[۰-۹0-9 -_)(*&^%$#@!~]+$|^.*خخ+.*$|^.*(ههه )+.*$|^.*\#\#+.*$|^WORDorEXP$|^WORDorEXP$|^WORDorEXP$')
+    Pattern = r'^[۰-۹0-9 -_)(*&^%$#@!~]+$|^.*خخ+.*$|^.*(ههه )+.*$|^.*\#\#+.*$|^WORDorEXP$|^WORDorEXP$|^WORDorEXP$'
     for segment in SegmentedSentence[0:-1]:
         SegmentString = " ".join(segment)
         
@@ -1860,7 +1860,7 @@ print('\n PostsSegments_Windowing Saved')
 '''
 #OR
 print('Loading PostsSegments_Windowing ...')
-tempNumpyArray=np.load(Path+r'\PostsSegments_Windowing.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'PostsSegments_Windowing.npy'),allow_pickle=True)
 PostsSegments_Windowing = tempNumpyArray.tolist()
 '''
 
@@ -1880,9 +1880,9 @@ print('\n EventSegmentWeight_Windowing Saved')
 '''
 #OR
 print('Loading EventSegment ...')
-tempNumpyArray=np.load(Path+r'\EventSegment_Windowing.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'EventSegment_Windowing.npy'),allow_pickle=True)
 EventSegment_Windowing = tempNumpyArray.tolist()
-tempNumpyArray=np.load(Path+r'\EventSegmentWeight_Windowing.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'EventSegmentWeight_Windowing.npy'),allow_pickle=True)
 EventSegmentWeight_Windowing = tempNumpyArray.tolist()
 '''
 
@@ -1894,9 +1894,9 @@ EventSegmentWeight_Windowing = tempNumpyArray.tolist()
 #EventSegment_Windowing = [*EventSegment_Windowing ,*EventSegment_Windowing_2LastWindow ]
 #EventSegmentWeight_Windowing = [*EventSegmentWeight_Windowing ,*EventSegmentWeight_Windowing_2LastWindow ]
 #
-#np.save(Path+r'\EventSegment_Windowing.npy',EventSegment_Windowing)
+#np.save(os.path.join(Path,'EventSegment_Windowing.npy'),EventSegment_Windowing)
 #print('\n EventSegment_Windowing Saved')
-#np.save(Path+r'\EventSegmentWeight_Windowing.npy',EventSegmentWeight_Windowing)
+#np.save(os.path.join(Path,'EventSegmentWeight_Windowing.npy'),EventSegmentWeight_Windowing)
 #print('\n EventSegmentWeight_Windowing Saved')
 #
 #################################################################################################################
@@ -1915,7 +1915,7 @@ print('\n SimilarityGraph Saved')
 '''
 #OR
 print('Loading SimilarityGraph ...')
-tempNumpyArray=np.load(Path+r'\SimilarityGraph.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'SimilarityGraph.npy'),allow_pickle=True)
 SimilarityGraph = tempNumpyArray.tolist()
 '''
 
@@ -1925,7 +1925,7 @@ SimilarityGraph = tempNumpyArray.tolist()
 #
 #SimilarityGraph = [*SimilarityGraph ,*SimilarityGraph_2LastWindow ]
 #
-#np.save(Path+r'\SimilarityGraph.npy',SimilarityGraph)
+#np.save(os.path.join(Path,'SimilarityGraph.npy'),SimilarityGraph)
 #print('\n SimilarityGraph Saved')
 #
 #################################################################################################################
@@ -1940,12 +1940,12 @@ print('\n CondidateEvents Saved')
 '''
 #OR
 print('Loading CondidateEvents ...')
-tempNumpyArray=np.load(Path+r'\CondidateEvents.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'CondidateEvents.npy'),allow_pickle=True)
 CondidateEvents = tempNumpyArray.tolist()
 '''
 
 
-##SaveToExcellK_value(Path+r'\KvalueBySiluhette.xls',KList,KMinList,S_Score,"Silh")   # if run Bt Parametr tuning in line 2519
+##SaveToExcellK_value(os.path.join(Path,'KvalueBySiluhette.xls'),KList,KMinList,S_Score,"Silh")   # if run Bt Parametr tuning in line 2519
 
 
 """##############################################################################
@@ -2028,10 +2028,10 @@ for k in range(K,MaxK):
         
         
         
-SaveToExcellK_value(Path+r'\KvalueBySiluhetteAfterAllProcesss_'+str(WINDOWNUMBER)+'.xls',KList,KMinList,S_Score_After,'SiluhetteAfter')
-SaveToExcellK_value(Path+r'\KvalueByClassEntropy_'+str(WINDOWNUMBER)+'.xls',KList,KMinList,Class_E,'ClassEntropy')
-SaveToExcellK_value(Path+r'\KvalueByClusterEntropy_'+str(WINDOWNUMBER)+'.xls',KList,KMinList,Cluster_E,'ClusterEntropy')
-SaveToExcellK_value(Path+r'\KvalueByTotalEntropyMeasure_'+str(WINDOWNUMBER)+'.xls',KList,KMinList,Entropy_Measure,'EntropyMeasure')
+SaveToExcellK_value(os.path.join(Path,'KvalueBySiluhetteAfterAllProcesss_'+str(WINDOWNUMBER)+'.xls'),KList,KMinList,S_Score_After,'SiluhetteAfter')
+SaveToExcellK_value(os.path.join(Path,'KvalueByClassEntropy_'+str(WINDOWNUMBER)+'.xls'),KList,KMinList,Class_E,'ClassEntropy')
+SaveToExcellK_value(os.path.join(Path,'KvalueByClusterEntropy_'+str(WINDOWNUMBER)+'.xls'),KList,KMinList,Cluster_E,'ClusterEntropy')
+SaveToExcellK_value(os.path.join(Path,'KvalueByTotalEntropyMeasure_'+str(WINDOWNUMBER)+'.xls'),KList,KMinList,Entropy_Measure,'EntropyMeasure')
         
         
     
@@ -2053,13 +2053,13 @@ SaveToExcellK_value(Path+r'\KvalueByTotalEntropyMeasure_'+str(WINDOWNUMBER)+'.xl
 print("Clustering Start")
 CondidateEvents = EventSegmentClustering(SimilarityGraph,EventSegment_Windowing,k,k_min)
 
-np.save(Path+r'\CondidateEvents.npy',CondidateEvents)
+np.save(os.path.join(Path,'CondidateEvents.npy'),CondidateEvents)
 print('\n CondidateEvents Saved')
 
 #OR
 '''
 print('Loading CondidateEvents ...')
-tempNumpyArray=np.load(Path+r'\CondidateEvents.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'CondidateEvents.npy'),allow_pickle=True)
 CondidateEvents = tempNumpyArray.tolist()
 """##%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%55
 
@@ -2071,7 +2071,7 @@ print('\n MiuE Saved')
 '''
 #OR
 print('Loading MiuE ...')
-tempNumpyArray=np.load(Path+r'\MiuE.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'MiuE.npy'),allow_pickle=True)
 MiuE = tempNumpyArray.tolist()
 '''
 
@@ -2081,7 +2081,7 @@ MiuE = tempNumpyArray.tolist()
 #
 #MiuE = [*MiuE ,*MiuE_2LastWindow ]
 #
-#np.save(Path+r'\MiuE.npy',MiuE)
+#np.save(os.path.join(Path,'MiuE.npy'),MiuE)
 #print('\n MiuE Saved')
 #################################################################################################################
 
@@ -2093,7 +2093,7 @@ print('\n MiuX Saved')
 '''
 #OR
 print('Loading MiuX ...')
-tempNumpyArray=np.load(Path+r'\MiuX.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'MiuX.npy'),allow_pickle=True)
 MiuX = tempNumpyArray.tolist()
 '''
 
@@ -2104,7 +2104,7 @@ MiuX = tempNumpyArray.tolist()
 #
 #MiuX = [*MiuX ,*MiuX_2LastWindow ]
 #
-#np.save(Path+r'\MiuX.npy',MiuX)
+#np.save(os.path.join(Path,'MiuX.npy'),MiuX)
 #print('\n MiuX Saved')
 ##################################################################################################################
 #
@@ -2135,22 +2135,22 @@ MiuX = tempNumpyArray.tolist()
 #MiuE = MiuE[13:17]
 #MiuX = MiuX[13:17]
 #
-#Path = Path+r'\Window14_17'
-#np.save(Path+r'\AllData.npy',AllData)
+#Path = os.path.join(Path,'Window14_17')
+#np.save(os.path.join(Path,'AllData.npy'),AllData)
 #print('\n AllData Saved')
-#np.save(Path+r'\PostsSegments_Windowing.npy',PostsSegments_Windowing)
+#np.save(os.path.join(Path,'PostsSegments_Windowing.npy'),PostsSegments_Windowing)
 #print('\n PostsSegments_Windowing Saved')
-#np.save(Path+r'\EventSegment_Windowing.npy',EventSegment_Windowing)
+#np.save(os.path.join(Path,'EventSegment_Windowing.npy'),EventSegment_Windowing)
 #print('\n EventSegment_Windowing Saved')
-#np.save(Path+r'\EventSegmentWeight_Windowing.npy',EventSegmentWeight_Windowing)
+#np.save(os.path.join(Path,'EventSegmentWeight_Windowing.npy'),EventSegmentWeight_Windowing)
 #print('\n EventSegmentWeight_Windowing Saved')
-#np.save(Path+r'\SimilarityGraph.npy',SimilarityGraph)
+#np.save(os.path.join(Path,'SimilarityGraph.npy'),SimilarityGraph)
 #print('\n SimilarityGraph Saved')
-#np.save(Path+r'\CondidateEvents.npy',CondidateEvents)
+#np.save(os.path.join(Path,'CondidateEvents.npy'),CondidateEvents)
 #print('\n CondidateEvents Saved')
-#np.save(Path+r'\MiuE.npy',MiuE)
+#np.save(os.path.join(Path,'MiuE.npy'),MiuE)
 #print('\n MiuE Saved')
-#np.save(Path+r'\MiuX.npy',MiuX)
+#np.save(os.path.join(Path,'MiuX.npy'),MiuX)
 #print('\n MiuX Saved')
 ####
 ####
@@ -2179,7 +2179,7 @@ print('\n RealisticEvents Saved')
 '''
 #OR
 print('Loading RealisticEvents ...')
-tempNumpyArray=np.load(Path+r'\RealisticEvents_tereshold15.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'RealisticEvents_tereshold15.npy'),allow_pickle=True)
 RealisticEvents = tempNumpyArray.tolist()
 '''
 
@@ -2195,7 +2195,7 @@ print('\n RealisticEventsTopK Saved')
 '''
 #OR
 print('Loading RealisticEventsTopK ...')
-tempNumpyArray=np.load(Path+r'\RealisticEvents_tereshold15_TopK5.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'RealisticEvents_tereshold15_TopK5.npy'),allow_pickle=True)
 RealisticEventsTopK = tempNumpyArray.tolist()
 '''
 
@@ -2215,7 +2215,7 @@ RealisticEventsTopK = tempNumpyArray.tolist()
 #
 #RealisticEvents = [*RealisticEvents ,*RealisticEvents_2LastWindow ]
 #
-#np.save(Path+r'\RealisticEvents.npy',RealisticEvents)
+#np.save(os.path.join(Path,'RealisticEvents.npy'),RealisticEvents)
 #print('\n RealisticEvents Saved')
 #################################################################################################################
 
@@ -2227,7 +2227,7 @@ print('\n TitleToDescribeEvents Saved')
 '''
 #OR
 print('Loading TitleToDescribeEventsSTR ...')
-tempNumpyArray=np.load(Path+r'\TitleToDescribeEventsSTR_tereshold15.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'TitleToDescribeEventsSTR_tereshold15.npy'),allow_pickle=True)
 TitleToDescribeEventsSTR = tempNumpyArray.tolist()
 '''
 
@@ -2242,7 +2242,7 @@ TitleToDescribeEventsSTR = tempNumpyArray.tolist()
 #
 #TitleToDescribeEventsSTR = [*TitleToDescribeEventsSTR ,*TitleToDescribeEventsSTR_2LastWindow ]
 #
-#np.save(Path+r'\TitleToDescribeEventsSTR.npy',TitleToDescribeEventsSTR)
+#np.save(os.path.join(Path,'TitleToDescribeEventsSTR.npy'),TitleToDescribeEventsSTR)
 #print('\n TitleToDescribeEvents Saved')
 #################################################################################################################
 #
@@ -2261,10 +2261,10 @@ print('\n RelatedSequence Saved')
 '''
 #OR
 print('Loading RelatedDocuments ...')
-tempNumpyArray=np.load(Path+r'\RelatedDocuments_tereshold15.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'RelatedDocuments_tereshold15.npy'),allow_pickle=True)
 RelatedDocuments = tempNumpyArray.tolist()
 print('Loading RelatedSequence ...')
-tempNumpyArray=np.load(Path+r'\RelatedSequence_tereshold15.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'RelatedSequence_tereshold15.npy'),allow_pickle=True)
 RelatedSequence = tempNumpyArray.tolist()
 '''
 
@@ -2278,7 +2278,7 @@ print('\n RelatedDocumentsString Saved')
 '''
 #OR
 print('Loading RelatedDocumentsString ...')
-tempNumpyArray=np.load(Path+r'\RelatedDocumentsString_tereshold15.npy',allow_pickle=True)
+tempNumpyArray=np.load(os.path.join(Path, 'RelatedDocumentsString_tereshold15.npy'),allow_pickle=True)
 RelatedDocumentsString = tempNumpyArray.tolist()
 '''
 
