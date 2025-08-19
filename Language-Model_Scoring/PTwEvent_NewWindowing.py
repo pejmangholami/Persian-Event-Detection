@@ -41,9 +41,13 @@ class LanguageModelScorer:
         print(f"Loading model {model_name}...")
         self.model = AutoModelForMaskedLM.from_pretrained(model_name)
         self.model.eval()
+        self.cache = {}
         print("Model loaded.")
 
     def get_score(self, text):
+        # Return cached score if available to avoid re-computation
+        if text in self.cache:
+            return self.cache[text]
         if not text:
             return 0.0
 
@@ -81,6 +85,8 @@ class LanguageModelScorer:
         avg_log_prob = total_log_prob / len(tokenized_text)
         score = math.exp(avg_log_prob)
 
+        # Cache the result before returning
+        self.cache[text] = score
         return score
 
 def initialize_lm_scorer():
