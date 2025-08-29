@@ -1901,7 +1901,7 @@ if __name__ == '__main__':
     print("Segmenting posts...")
     PostsSegments_Windowing = Segmentation(AllData[1])
     #AllData[1] Means the Posts in TimeWindowing
-    np.save(os.path.join(Path, 'PostsSegments_Windowing.npy'), PostsSegments_Windowing)
+    np.save(os.path.join(Path, 'PostsSegments_Windowing.npy'), PostsSegments_Windowing, allow_pickle=True)
     print('\n PostsSegments_Windowing Saved')
     '''
     #OR
@@ -1919,9 +1919,9 @@ if __name__ == '__main__':
     print("Detecting bursty segments...")
     EventSegment_Windowing,EventSegmentWeight_Windowing = DetectBursty(AllData,PostsSegments_Windowing)
     #EventSegment is TweetsBurstySegments
-    np.save(os.path.join(Path, 'EventSegment_Windowing.npy'), EventSegment_Windowing)
+    np.save(os.path.join(Path, 'EventSegment_Windowing.npy'), EventSegment_Windowing, allow_pickle=True)
     print('\n EventSegment_Windowing Saved')
-    np.save(os.path.join(Path, 'EventSegmentWeight_Windowing.npy'), EventSegmentWeight_Windowing)
+    np.save(os.path.join(Path, 'EventSegmentWeight_Windowing.npy'), EventSegmentWeight_Windowing, allow_pickle=True)
     print('\n EventSegmentWeight_Windowing Saved')
     '''
     #OR
@@ -1956,7 +1956,7 @@ if __name__ == '__main__':
     StepTime = timedelta(hours=4) # timedelta(days=1)
     SimilarityGraph = EventSegmentClustering_Similarity(AllData,EventSegment_Windowing,StartTime,StepTime)
     # Condedate Evente is clysters of segment in each time window
-    np.save(os.path.join(Path, 'SimilarityGraph.npy'), SimilarityGraph)
+    np.save(os.path.join(Path, 'SimilarityGraph.npy'), SimilarityGraph, allow_pickle=True)
     print('\n SimilarityGraph Saved')
     '''
     #OR
@@ -1981,7 +1981,7 @@ if __name__ == '__main__':
     #############EvaluateAfterClusteringComplete
     print("Clustering started...")
     CondidateEvents,NoiseS = EventSegmentClustering(SimilarityGraph,EventSegment_Windowing,15,6)      # CondidateEvents,KList,KMinList,S_Score = EventSegmentClusteringByParametrTunning(SimilarityGraph,EventSegment_Windowing)
-    np.save(os.path.join(Path, 'CondidateEvents.npy'), CondidateEvents)
+    np.save(os.path.join(Path, 'CondidateEvents.npy'), CondidateEvents, allow_pickle=True)
     print('\n CondidateEvents Saved')
     '''
     #OR
@@ -2112,7 +2112,7 @@ if __name__ == '__main__':
 
     print("Calculating event newsworthiness...")
     MiuE = EventNewsWorthy(CondidateEvents,SimilarityGraph)
-    np.save(os.path.join(Path, 'MiuE.npy'), MiuE)
+    np.save(os.path.join(Path, 'MiuE.npy'), MiuE, allow_pickle=True)
     print('\n MiuE Saved')
     '''
     #OR
@@ -2134,7 +2134,7 @@ if __name__ == '__main__':
 
     print("Calculating highest newsworthiness...")
     MiuX = HighestNewsWorthy(MiuE,CondidateEvents)
-    np.save(os.path.join(Path, 'MiuX.npy'), MiuX)
+    np.save(os.path.join(Path, 'MiuX.npy'), MiuX, allow_pickle=True)
     print('\n MiuX Saved')
     '''
     #OR
@@ -2220,7 +2220,7 @@ if __name__ == '__main__':
     print("Detecting realistic events...")
     Tereshold = 15##################################################################################.5
     RealisticEvents = DetectRealisticEvents(MiuX,MiuE,Tereshold,CondidateEvents)
-    np.save(os.path.join(Path, 'RealisticEvents_tereshold15.npy'), RealisticEvents)
+    np.save(os.path.join(Path, 'RealisticEvents_tereshold15.npy'), RealisticEvents, allow_pickle=True)
     print('\n RealisticEvents Saved')
     '''
     #OR
@@ -2236,7 +2236,7 @@ if __name__ == '__main__':
     Tereshold = 15
     K_Value = 5
     RealisticEventsTopK = DetectRealisticEventsTopK(MiuX,MiuE,K_Value,Tereshold,CondidateEvents)
-    np.save(os.path.join(Path, 'RealisticEvents_tereshold15_TopK5.npy'), RealisticEventsTopK)
+    np.save(os.path.join(Path, 'RealisticEvents_tereshold15_TopK5.npy'), RealisticEventsTopK, allow_pickle=True)
     print('\n RealisticEventsTopK Saved')
     '''
     #OR
@@ -2268,7 +2268,7 @@ if __name__ == '__main__':
 
     print("Describing events...")
     TitleToDescribeEventsSTR = DescribeEvents(RealisticEvents)
-    np.save(os.path.join(Path, 'TitleToDescribeEventsSTR_tereshold15.npy'), TitleToDescribeEventsSTR)
+    np.save(os.path.join(Path, 'TitleToDescribeEventsSTR_tereshold15.npy'), TitleToDescribeEventsSTR, allow_pickle=True)
     print('\n TitleToDescribeEvents Saved')
     '''
     #OR
@@ -2300,9 +2300,9 @@ if __name__ == '__main__':
 
     print("Detecting related documents...")
     RelatedDocuments,RelatedSequence = DetectRelatedDoc(AllData,PostsSegments_Windowing,RealisticEvents)
-    np.save(os.path.join(Path, 'RelatedDocuments_tereshold15.npy'), RelatedDocuments)
+    np.save(os.path.join(Path, 'RelatedDocuments_tereshold15.npy'), RelatedDocuments, allow_pickle=True)
     print('\n RelatedDocuments Saved')
-    np.save(os.path.join(Path, 'RelatedSequence_tereshold15.npy'), RelatedSequence)
+    np.save(os.path.join(Path, 'RelatedSequence_tereshold15.npy'), RelatedSequence, allow_pickle=True)
     print('\n RelatedSequence Saved')
     '''
     #OR
@@ -2319,7 +2319,7 @@ if __name__ == '__main__':
 
     print("Joining segments...")
     RelatedDocumentsString = JoinSegments(RelatedDocuments)
-    np.save(os.path.join(Path, 'RelatedDocumentsString_tereshold15.npy'), RelatedDocumentsString)
+    np.save(os.path.join(Path, 'RelatedDocumentsString_tereshold15.npy'), RelatedDocumentsString, allow_pickle=True)
     print('\n RelatedDocumentsString Saved')
     '''
     #OR
