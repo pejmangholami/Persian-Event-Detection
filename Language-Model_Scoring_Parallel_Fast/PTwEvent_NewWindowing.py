@@ -1372,12 +1372,12 @@ def DetectRealisticEventsTopK(MiuX,MiuE,K_Value,Tereshold,CondidateEvents):
 
 
 
-def Top5Rank(Cluster, pool):
+def Top5Rank(Cluster):
     AllWord = Cluster
     if not AllWord:
         return []
 
-    AllWordRank = pool.map(MiuS, AllWord)
+    AllWordRank = [MiuS(segment) for segment in AllWord]
 
     # Soarting Process
     zipped_lists = zip(AllWordRank, AllWord)
@@ -1400,12 +1400,10 @@ def DescribeEvents_2LastWindow(RealisticEvents):
     TitleToDescribeEvents = []
     with multiprocessing.Pool(initializer=init_worker) as pool:
         for WinNum in range(len(RealisticEvents) - 2, len(RealisticEvents)):
-            TitleToDescribeEvents.append([])
-            for ClusterNum, Cluster in enumerate(RealisticEvents[WinNum]):
-                print('WinNum:{}/{}##ClusterNum:{}/{}'.format(WinNum, len(RealisticEvents), ClusterNum,
-                                                               len(RealisticEvents[WinNum])))
-                CurrentTitle = Top5Rank(Cluster, pool)
-                TitleToDescribeEvents[-1].append(CurrentTitle)
+            print(f"--- Describing Events for Window {WinNum} ---")
+            clusters_to_process = RealisticEvents[WinNum]
+            titles = pool.map(Top5Rank, clusters_to_process)
+            TitleToDescribeEvents.append(titles)
     return TitleToDescribeEvents
 
 
@@ -1414,18 +1412,13 @@ def DescribeEvents(RealisticEvents):
     # It's more efficient to create the pool once
     with multiprocessing.Pool(initializer=init_worker) as pool:
         for WinNum in range(len(RealisticEvents)):
-            TitleToDescribeEvents.append([])
-
-            # Create a list of clusters to process for the current window
+            print(f"--- Describing Events for Window {WinNum+1}/{len(RealisticEvents)} ---")
             clusters_to_process = RealisticEvents[WinNum]
 
-            # Use a partial function to pass the pool to Top5Rank
-            worker_func = partial(Top5Rank, pool=pool)
+            # Map the sequential Top5Rank function across the clusters
+            titles = pool.map(Top5Rank, clusters_to_process)
 
-            # Process clusters in parallel
-            titles = pool.map(worker_func, clusters_to_process)
-
-            TitleToDescribeEvents[-1] = titles
+            TitleToDescribeEvents.append(titles)
 
     return TitleToDescribeEvents
 
