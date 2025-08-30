@@ -1309,9 +1309,11 @@ def HighestNewsWorthy_NLastWindow(MiuE,CondidateEvents,n):
 def HighestNewsWorthy(MiuE,CondidateEvents):
     MiuX = []
     for WinNum in range(len(CondidateEvents)):
-        MiuX.append([])
-        MaxMiuValue = max(MiuE[WinNum])
-        MiuX[-1]=MaxMiuValue
+        if MiuE[WinNum]:
+            MaxMiuValue = max(MiuE[WinNum])
+            MiuX.append(MaxMiuValue)
+        else:
+            MiuX.append(0)
     return MiuX
 
 
