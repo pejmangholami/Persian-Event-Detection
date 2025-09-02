@@ -744,9 +744,6 @@ def DetectBurstyNLastWindow(AllData,PostSegments,n):
 
                 EventSegment_Windowing[-1].append(Seg[0:K])
                 EventSegmentWeight_Windowing[-1].append(Wei[0:K])
-        if len(EventSegment_Windowing[-1]) == 0:
-            del EventSegment_Windowing[-1]
-            del EventSegmentWeight_Windowing[-1]
 
     return EventSegment_Windowing,EventSegmentWeight_Windowing
 
@@ -755,78 +752,61 @@ def DetectBurstyNLastWindow(AllData,PostSegments,n):
 
 
 
-def DetectBursty(AllData,PostSegments):
-#    AllData Contain :
-#        Seq_Windowing,
-#        Posts_Windowing,
-#        Types_Windowing,
-#        Deleted_Windowing,
-#        DateSend_Windowing,
-#        User_Windowing,
-#        WindowNum
-
+def DetectBursty(AllData, PostSegments):
     EventSegment_Windowing = []
     EventSegmentWeight_Windowing = []
-    CurentPostBurstySegment = []
-    CurentPostBurstyWeight = []
-    BurstySegment = []
-    BurstyWeight = []
 
     for WinNum in range(len(PostSegments)):
-        print('DetectBursty For Win:{}/{}'.format(WinNum,len(PostSegments)))
-        BurstySegment.append([])
-        BurstyWeight.append([])
+        print('DetectBursty For Win:{}/{}'.format(WinNum, len(PostSegments)))
+
+        Window_BurstySegments = []
+        Window_BurstyWeights = []
+
         for PostNum in range(len(PostSegments[WinNum])):
-            for SegmentNum in range(len(PostSegments[WinNum][PostNum])):
-                CurrentSegment = PostSegments[WinNum][PostNum][SegmentNum]
-                Ps = P(PostSegments,CurrentSegment,WinNum)
-                Nt = len(PostSegments[WinNum])
-                Est = Ps*Nt
-                Fst = FST(CurrentSegment,PostSegments[WinNum])
-
-                if Fst > Est :
-                    #Segment Is Bursty
-                    CurentPostBurstySegment.append(CurrentSegment)
-                    Dst = math.sqrt(Nt*Ps*(1-Ps)) #Enheraf meyar
-                    if Fst >= (Est+2*Dst):
-                        PBst = 1
-                    else:
-                        PBst = sigmoid(10*(Fst-(Est+Dst))/Dst)
-
-                    Ust = U(AllData,PostSegments,WinNum,CurrentSegment)
-
-                    if Ust == 0:
-                        WBst = 0
-                    else:
-                        WBst = PBst*math.log(Ust)
-
-                    CurentPostBurstyWeight.append(WBst)
-            BurstySegment[-1].append(CurentPostBurstySegment)
-            BurstyWeight[-1].append(CurentPostBurstyWeight)
             CurentPostBurstySegment = []
             CurentPostBurstyWeight = []
 
-    for WinNum in range(len(BurstySegment)):
-        EventSegment_Windowing.append([])
-        EventSegmentWeight_Windowing.append([])
-        for PostNum in range(len(BurstySegment[WinNum])):
-            if len(BurstySegment[WinNum][PostNum]) != 0:
-                Nt = len(BurstySegment[WinNum])
-                K = math.ceil( math.sqrt(Nt) )
+            for SegmentNum in range(len(PostSegments[WinNum][PostNum])):
+                CurrentSegment = PostSegments[WinNum][PostNum][SegmentNum]
+                Ps = P(PostSegments, CurrentSegment, WinNum)
+                Nt = len(PostSegments[WinNum])
+                Est = Ps * Nt
+                Fst = FST(CurrentSegment, PostSegments[WinNum])
 
-                #Soarting Process
-                zipped_lists = zip(BurstyWeight[WinNum][PostNum], BurstySegment[WinNum][PostNum])
-                sorted_pairs = sorted(zipped_lists,reverse=True)
-                tuples = zip(*sorted_pairs)
-                Wei, Seg = [ list(tuple) for tuple in tuples]
+                if Fst > Est:
+                    CurentPostBurstySegment.append(CurrentSegment)
+                    Dst = math.sqrt(Nt * Ps * (1 - Ps))
+                    if Fst >= (Est + 2 * Dst):
+                        PBst = 1
+                    else:
+                        PBst = sigmoid(10 * (Fst - (Est + Dst)) / Dst)
+                    Ust = U(AllData, PostSegments, WinNum, CurrentSegment)
+                    WBst = PBst * math.log(Ust) if Ust > 0 else 0
+                    CurentPostBurstyWeight.append(WBst)
 
-                EventSegment_Windowing[-1].append(Seg[0:K])
-                EventSegmentWeight_Windowing[-1].append(Wei[0:K])
-        if len(EventSegment_Windowing[-1]) == 0:
-            del EventSegment_Windowing[-1]
-            del EventSegmentWeight_Windowing[-1]
+            if CurentPostBurstySegment:
+                Nt = len(PostSegments[WinNum])
+                K = math.ceil(math.sqrt(Nt))
 
-    return EventSegment_Windowing,EventSegmentWeight_Windowing
+                zipped_lists = zip(CurentPostBurstyWeight, CurentPostBurstySegment)
+                sorted_pairs = sorted(zipped_lists, reverse=True)
+
+                if sorted_pairs:
+                    tuples = zip(*sorted_pairs)
+                    Wei, Seg = [list(t) for t in tuples]
+                    Window_BurstySegments.append(Seg[0:K])
+                    Window_BurstyWeights.append(Wei[0:K])
+                else:
+                    Window_BurstySegments.append([])
+                    Window_BurstyWeights.append([])
+            else:
+                Window_BurstySegments.append([])
+                Window_BurstyWeights.append([])
+
+        EventSegment_Windowing.append(Window_BurstySegments)
+        EventSegmentWeight_Windowing.append(Window_BurstyWeights)
+
+    return EventSegment_Windowing, EventSegmentWeight_Windowing
 
 def TweetContain(node,CurrentSubWindow):
     res = []
@@ -1309,9 +1289,11 @@ def HighestNewsWorthy_NLastWindow(MiuE,CondidateEvents,n):
 def HighestNewsWorthy(MiuE,CondidateEvents):
     MiuX = []
     for WinNum in range(len(CondidateEvents)):
-        MiuX.append([])
-        MaxMiuValue = max(MiuE[WinNum])
-        MiuX[-1]=MaxMiuValue
+        if MiuE[WinNum]:
+            MaxMiuValue = max(MiuE[WinNum])
+            MiuX.append(MaxMiuValue)
+        else:
+            MiuX.append(0)
     return MiuX
 
 
@@ -1370,12 +1352,12 @@ def DetectRealisticEventsTopK(MiuX,MiuE,K_Value,Tereshold,CondidateEvents):
 
 
 
-def Top5Rank(Cluster, pool):
+def Top5Rank(Cluster):
     AllWord = Cluster
     if not AllWord:
         return []
 
-    AllWordRank = pool.map(MiuS, AllWord)
+    AllWordRank = [MiuS(segment) for segment in AllWord]
 
     # Soarting Process
     zipped_lists = zip(AllWordRank, AllWord)
@@ -1398,12 +1380,10 @@ def DescribeEvents_2LastWindow(RealisticEvents):
     TitleToDescribeEvents = []
     with multiprocessing.Pool(initializer=init_worker) as pool:
         for WinNum in range(len(RealisticEvents) - 2, len(RealisticEvents)):
-            TitleToDescribeEvents.append([])
-            for ClusterNum, Cluster in enumerate(RealisticEvents[WinNum]):
-                print('WinNum:{}/{}##ClusterNum:{}/{}'.format(WinNum, len(RealisticEvents), ClusterNum,
-                                                               len(RealisticEvents[WinNum])))
-                CurrentTitle = Top5Rank(Cluster, pool)
-                TitleToDescribeEvents[-1].append(CurrentTitle)
+            print(f"--- Describing Events for Window {WinNum} ---")
+            clusters_to_process = RealisticEvents[WinNum]
+            titles = pool.map(Top5Rank, clusters_to_process)
+            TitleToDescribeEvents.append(titles)
     return TitleToDescribeEvents
 
 
@@ -1412,18 +1392,13 @@ def DescribeEvents(RealisticEvents):
     # It's more efficient to create the pool once
     with multiprocessing.Pool(initializer=init_worker) as pool:
         for WinNum in range(len(RealisticEvents)):
-            TitleToDescribeEvents.append([])
-
-            # Create a list of clusters to process for the current window
+            print(f"--- Describing Events for Window {WinNum+1}/{len(RealisticEvents)} ---")
             clusters_to_process = RealisticEvents[WinNum]
 
-            # Use a partial function to pass the pool to Top5Rank
-            worker_func = partial(Top5Rank, pool=pool)
+            # Map the sequential Top5Rank function across the clusters
+            titles = pool.map(Top5Rank, clusters_to_process)
 
-            # Process clusters in parallel
-            titles = pool.map(worker_func, clusters_to_process)
-
-            TitleToDescribeEvents[-1] = titles
+            TitleToDescribeEvents.append(titles)
 
     return TitleToDescribeEvents
 
@@ -1898,11 +1873,16 @@ if __name__ == '__main__':
     # instead of loading from pre-computed files.
 
     #Segment kardane post ha (Az SCP Estefade shode)
-    print("Segmenting posts...")
-    PostsSegments_Windowing = Segmentation(AllData[1])
-    #AllData[1] Means the Posts in TimeWindowing
-    np.save(os.path.join(Path, 'PostsSegments_Windowing.npy'), PostsSegments_Windowing)
-    print('\n PostsSegments_Windowing Saved')
+    posts_segments_path = os.path.join(Path, 'PostsSegments_Windowing.npy')
+    if os.path.exists(posts_segments_path):
+        print('Loading PostsSegments_Windowing from file...')
+        PostsSegments_Windowing = np.load(posts_segments_path, allow_pickle=True).tolist()
+    else:
+        print("Segmenting posts...")
+        PostsSegments_Windowing = Segmentation(AllData[1])
+        #AllData[1] Means the Posts in TimeWindowing
+        np.save(posts_segments_path, np.array(PostsSegments_Windowing, dtype=object), allow_pickle=True)
+        print('\n PostsSegments_Windowing Saved')
     '''
     #OR
     print('Loading PostsSegments_Windowing ...')
@@ -1916,13 +1896,20 @@ if __name__ == '__main__':
 
 
     #Detect Bursty Segment
-    print("Detecting bursty segments...")
-    EventSegment_Windowing,EventSegmentWeight_Windowing = DetectBursty(AllData,PostsSegments_Windowing)
-    #EventSegment is TweetsBurstySegments
-    np.save(os.path.join(Path, 'EventSegment_Windowing.npy'), EventSegment_Windowing)
-    print('\n EventSegment_Windowing Saved')
-    np.save(os.path.join(Path, 'EventSegmentWeight_Windowing.npy'), EventSegmentWeight_Windowing)
-    print('\n EventSegmentWeight_Windowing Saved')
+    event_segment_path = os.path.join(Path, 'EventSegment_Windowing.npy')
+    event_segment_weight_path = os.path.join(Path, 'EventSegmentWeight_Windowing.npy')
+    if os.path.exists(event_segment_path) and os.path.exists(event_segment_weight_path):
+        print('Loading EventSegment and EventSegmentWeight from file...')
+        EventSegment_Windowing = np.load(event_segment_path, allow_pickle=True).tolist()
+        EventSegmentWeight_Windowing = np.load(event_segment_weight_path, allow_pickle=True).tolist()
+    else:
+        print("Detecting bursty segments...")
+        EventSegment_Windowing,EventSegmentWeight_Windowing = DetectBursty(AllData,PostsSegments_Windowing)
+        #EventSegment is TweetsBurstySegments
+        np.save(event_segment_path, np.array(EventSegment_Windowing, dtype=object), allow_pickle=True)
+        print('\n EventSegment_Windowing Saved')
+        np.save(event_segment_weight_path, np.array(EventSegmentWeight_Windowing, dtype=object), allow_pickle=True)
+        print('\n EventSegmentWeight_Windowing Saved')
     '''
     #OR
     print('Loading EventSegment ...')
@@ -1952,12 +1939,17 @@ if __name__ == '__main__':
     # I will define it here.
     StartTime = datetime(2017, 1,  1, 00, 00, 00)
 
-    print("Clustering event segments...")
-    StepTime = timedelta(hours=4) # timedelta(days=1)
-    SimilarityGraph = EventSegmentClustering_Similarity(AllData,EventSegment_Windowing,StartTime,StepTime)
-    # Condedate Evente is clysters of segment in each time window
-    np.save(os.path.join(Path, 'SimilarityGraph.npy'), SimilarityGraph)
-    print('\n SimilarityGraph Saved')
+    similarity_graph_path = os.path.join(Path, 'SimilarityGraph.npy')
+    if os.path.exists(similarity_graph_path):
+        print('Loading SimilarityGraph from file...')
+        SimilarityGraph = np.load(similarity_graph_path, allow_pickle=True).tolist()
+    else:
+        print("Clustering event segments...")
+        StepTime = timedelta(hours=4) # timedelta(days=1)
+        SimilarityGraph = EventSegmentClustering_Similarity(AllData,EventSegment_Windowing,StartTime,StepTime)
+        # Condedate Evente is clysters of segment in each time window
+        np.save(similarity_graph_path, np.array(SimilarityGraph, dtype=object), allow_pickle=True)
+        print('\n SimilarityGraph Saved')
     '''
     #OR
     print('Loading SimilarityGraph ...')
@@ -1979,10 +1971,15 @@ if __name__ == '__main__':
 
 
     #############EvaluateAfterClusteringComplete
-    print("Clustering started...")
-    CondidateEvents,NoiseS = EventSegmentClustering(SimilarityGraph,EventSegment_Windowing,15,6)      # CondidateEvents,KList,KMinList,S_Score = EventSegmentClusteringByParametrTunning(SimilarityGraph,EventSegment_Windowing)
-    np.save(os.path.join(Path, 'CondidateEvents.npy'), CondidateEvents)
-    print('\n CondidateEvents Saved')
+    condidate_events_path = os.path.join(Path, 'CondidateEvents.npy')
+    if os.path.exists(condidate_events_path):
+        print('Loading CondidateEvents from file...')
+        CondidateEvents = np.load(condidate_events_path, allow_pickle=True).tolist()
+    else:
+        print("Clustering started...")
+        CondidateEvents,NoiseS = EventSegmentClustering(SimilarityGraph,EventSegment_Windowing,15,6)      # CondidateEvents,KList,KMinList,S_Score = EventSegmentClusteringByParametrTunning(SimilarityGraph,EventSegment_Windowing)
+        np.save(condidate_events_path, np.array(CondidateEvents, dtype=object), allow_pickle=True)
+        print('\n CondidateEvents Saved')
     '''
     #OR
     print('Loading CondidateEvents ...')
@@ -2110,10 +2107,15 @@ if __name__ == '__main__':
     """##%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%55
 
 
-    print("Calculating event newsworthiness...")
-    MiuE = EventNewsWorthy(CondidateEvents,SimilarityGraph)
-    np.save(os.path.join(Path, 'MiuE.npy'), MiuE)
-    print('\n MiuE Saved')
+    miue_path = os.path.join(Path, 'MiuE.npy')
+    if os.path.exists(miue_path):
+        print('Loading MiuE from file...')
+        MiuE = np.load(miue_path, allow_pickle=True).tolist()
+    else:
+        print("Calculating event newsworthiness...")
+        MiuE = EventNewsWorthy(CondidateEvents,SimilarityGraph)
+        np.save(miue_path, np.array(MiuE, dtype=object), allow_pickle=True)
+        print('\n MiuE Saved')
     '''
     #OR
     print('Loading MiuE ...')
@@ -2132,10 +2134,15 @@ if __name__ == '__main__':
     #################################################################################################################
 
 
-    print("Calculating highest newsworthiness...")
-    MiuX = HighestNewsWorthy(MiuE,CondidateEvents)
-    np.save(os.path.join(Path, 'MiuX.npy'), MiuX)
-    print('\n MiuX Saved')
+    miux_path = os.path.join(Path, 'MiuX.npy')
+    if os.path.exists(miux_path):
+        print('Loading MiuX from file...')
+        MiuX = np.load(miux_path, allow_pickle=True).tolist()
+    else:
+        print("Calculating highest newsworthiness...")
+        MiuX = HighestNewsWorthy(MiuE,CondidateEvents)
+        np.save(miux_path, np.array(MiuX, dtype=object), allow_pickle=True)
+        print('\n MiuX Saved')
     '''
     #OR
     print('Loading MiuX ...')
@@ -2216,12 +2223,16 @@ if __name__ == '__main__':
 
 
     #->>>>>>      AZ INJA BE BAD HATMAN ESME File Hayi Ke SAVE Mishe Cheack Shavad
-
-    print("Detecting realistic events...")
-    Tereshold = 15##################################################################################.5
-    RealisticEvents = DetectRealisticEvents(MiuX,MiuE,Tereshold,CondidateEvents)
-    np.save(os.path.join(Path, 'RealisticEvents_tereshold15.npy'), RealisticEvents)
-    print('\n RealisticEvents Saved')
+    realistic_events_path = os.path.join(Path, 'RealisticEvents_tereshold15.npy')
+    if os.path.exists(realistic_events_path):
+        print('Loading RealisticEvents from file...')
+        RealisticEvents = np.load(realistic_events_path, allow_pickle=True).tolist()
+    else:
+        print("Detecting realistic events...")
+        Tereshold = 15##################################################################################.5
+        RealisticEvents = DetectRealisticEvents(MiuX,MiuE,Tereshold,CondidateEvents)
+        np.save(realistic_events_path, np.array(RealisticEvents, dtype=object), allow_pickle=True)
+        print('\n RealisticEvents Saved')
     '''
     #OR
     print('Loading RealisticEvents ...')
@@ -2232,12 +2243,17 @@ if __name__ == '__main__':
 
 
 
-    print("Detecting top K realistic events...")
-    Tereshold = 15
-    K_Value = 5
-    RealisticEventsTopK = DetectRealisticEventsTopK(MiuX,MiuE,K_Value,Tereshold,CondidateEvents)
-    np.save(os.path.join(Path, 'RealisticEvents_tereshold15_TopK5.npy'), RealisticEventsTopK)
-    print('\n RealisticEventsTopK Saved')
+    realistic_events_topk_path = os.path.join(Path, 'RealisticEvents_tereshold15_TopK5.npy')
+    if os.path.exists(realistic_events_topk_path):
+        print('Loading RealisticEventsTopK from file...')
+        RealisticEventsTopK = np.load(realistic_events_topk_path, allow_pickle=True).tolist()
+    else:
+        print("Detecting top K realistic events...")
+        Tereshold = 15
+        K_Value = 5
+        RealisticEventsTopK = DetectRealisticEventsTopK(MiuX,MiuE,K_Value,Tereshold,CondidateEvents)
+        np.save(realistic_events_topk_path, np.array(RealisticEventsTopK, dtype=object), allow_pickle=True)
+        print('\n RealisticEventsTopK Saved')
     '''
     #OR
     print('Loading RealisticEventsTopK ...')
@@ -2266,10 +2282,15 @@ if __name__ == '__main__':
     #################################################################################################################
 
 
-    print("Describing events...")
-    TitleToDescribeEventsSTR = DescribeEvents(RealisticEvents)
-    np.save(os.path.join(Path, 'TitleToDescribeEventsSTR_tereshold15.npy'), TitleToDescribeEventsSTR)
-    print('\n TitleToDescribeEvents Saved')
+    title_to_describe_path = os.path.join(Path, 'TitleToDescribeEventsSTR_tereshold15.npy')
+    if os.path.exists(title_to_describe_path):
+        print('Loading TitleToDescribeEventsSTR from file...')
+        TitleToDescribeEventsSTR = np.load(title_to_describe_path, allow_pickle=True).tolist()
+    else:
+        print("Describing events...")
+        TitleToDescribeEventsSTR = DescribeEvents(RealisticEvents)
+        np.save(title_to_describe_path, np.array(TitleToDescribeEventsSTR, dtype=object), allow_pickle=True)
+        print('\n TitleToDescribeEvents Saved')
     '''
     #OR
     print('Loading TitleToDescribeEventsSTR ...')
@@ -2298,12 +2319,19 @@ if __name__ == '__main__':
 
 
 
-    print("Detecting related documents...")
-    RelatedDocuments,RelatedSequence = DetectRelatedDoc(AllData,PostsSegments_Windowing,RealisticEvents)
-    np.save(os.path.join(Path, 'RelatedDocuments_tereshold15.npy'), RelatedDocuments)
-    print('\n RelatedDocuments Saved')
-    np.save(os.path.join(Path, 'RelatedSequence_tereshold15.npy'), RelatedSequence)
-    print('\n RelatedSequence Saved')
+    related_docs_path = os.path.join(Path, 'RelatedDocuments_tereshold15.npy')
+    related_seq_path = os.path.join(Path, 'RelatedSequence_tereshold15.npy')
+    if os.path.exists(related_docs_path) and os.path.exists(related_seq_path):
+        print('Loading RelatedDocuments and RelatedSequence from file...')
+        RelatedDocuments = np.load(related_docs_path, allow_pickle=True).tolist()
+        RelatedSequence = np.load(related_seq_path, allow_pickle=True).tolist()
+    else:
+        print("Detecting related documents...")
+        RelatedDocuments,RelatedSequence = DetectRelatedDoc(AllData,PostsSegments_Windowing,RealisticEvents)
+        np.save(related_docs_path, np.array(RelatedDocuments, dtype=object), allow_pickle=True)
+        print('\n RelatedDocuments Saved')
+        np.save(related_seq_path, np.array(RelatedSequence, dtype=object), allow_pickle=True)
+        print('\n RelatedSequence Saved')
     '''
     #OR
     print('Loading RelatedDocuments ...')
@@ -2317,10 +2345,15 @@ if __name__ == '__main__':
 
 
 
-    print("Joining segments...")
-    RelatedDocumentsString = JoinSegments(RelatedDocuments)
-    np.save(os.path.join(Path, 'RelatedDocumentsString_tereshold15.npy'), RelatedDocumentsString)
-    print('\n RelatedDocumentsString Saved')
+    related_docs_string_path = os.path.join(Path, 'RelatedDocumentsString_tereshold15.npy')
+    if os.path.exists(related_docs_string_path):
+        print('Loading RelatedDocumentsString from file...')
+        RelatedDocumentsString = np.load(related_docs_string_path, allow_pickle=True).tolist()
+    else:
+        print("Joining segments...")
+        RelatedDocumentsString = JoinSegments(RelatedDocuments)
+        np.save(related_docs_string_path, np.array(RelatedDocumentsString, dtype=object), allow_pickle=True)
+        print('\n RelatedDocumentsString Saved')
     '''
     #OR
     print('Loading RelatedDocumentsString ...')
