@@ -752,78 +752,61 @@ def DetectBurstyNLastWindow(AllData,PostSegments,n):
 
 
 
-def DetectBursty(AllData,PostSegments):
-#    AllData Contain :
-#        Seq_Windowing,
-#        Posts_Windowing,
-#        Types_Windowing,
-#        Deleted_Windowing,
-#        DateSend_Windowing,
-#        User_Windowing,
-#        WindowNum
-
+def DetectBursty(AllData, PostSegments):
     EventSegment_Windowing = []
     EventSegmentWeight_Windowing = []
-    CurentPostBurstySegment = []
-    CurentPostBurstyWeight = []
-    BurstySegment = []
-    BurstyWeight = []
 
     for WinNum in range(len(PostSegments)):
-        print('DetectBursty For Win:{}/{}'.format(WinNum,len(PostSegments)))
-        BurstySegment.append([])
-        BurstyWeight.append([])
+        print('DetectBursty For Win:{}/{}'.format(WinNum, len(PostSegments)))
+
+        Window_BurstySegments = []
+        Window_BurstyWeights = []
+
         for PostNum in range(len(PostSegments[WinNum])):
-            for SegmentNum in range(len(PostSegments[WinNum][PostNum])):
-                CurrentSegment = PostSegments[WinNum][PostNum][SegmentNum]
-                Ps = P(PostSegments,CurrentSegment,WinNum)
-                Nt = len(PostSegments[WinNum])
-                Est = Ps*Nt
-                Fst = FST(CurrentSegment,PostSegments[WinNum])
-
-                if Fst > Est :
-                    #Segment Is Bursty
-                    CurentPostBurstySegment.append(CurrentSegment)
-                    Dst = math.sqrt(Nt*Ps*(1-Ps)) #Enheraf meyar
-                    if Fst >= (Est+2*Dst):
-                        PBst = 1
-                    else:
-                        PBst = sigmoid(10*(Fst-(Est+Dst))/Dst)
-
-                    Ust = U(AllData,PostSegments,WinNum,CurrentSegment)
-
-                    if Ust == 0:
-                        WBst = 0
-                    else:
-                        WBst = PBst*math.log(Ust)
-
-                    CurentPostBurstyWeight.append(WBst)
-            BurstySegment[-1].append(CurentPostBurstySegment)
-            BurstyWeight[-1].append(CurentPostBurstyWeight)
             CurentPostBurstySegment = []
             CurentPostBurstyWeight = []
 
-    for WinNum in range(len(BurstySegment)):
-        EventSegment_Windowing.append([])
-        EventSegmentWeight_Windowing.append([])
-        for PostNum in range(len(BurstySegment[WinNum])):
-            if len(BurstySegment[WinNum][PostNum]) != 0:
-                Nt = len(BurstySegment[WinNum])
-                K = math.ceil( math.sqrt(Nt) )
+            for SegmentNum in range(len(PostSegments[WinNum][PostNum])):
+                CurrentSegment = PostSegments[WinNum][PostNum][SegmentNum]
+                Ps = P(PostSegments, CurrentSegment, WinNum)
+                Nt = len(PostSegments[WinNum])
+                Est = Ps * Nt
+                Fst = FST(CurrentSegment, PostSegments[WinNum])
 
-                #Soarting Process
-                zipped_lists = zip(BurstyWeight[WinNum][PostNum], BurstySegment[WinNum][PostNum])
-                sorted_pairs = sorted(zipped_lists,reverse=True)
-                tuples = zip(*sorted_pairs)
-                Wei, Seg = [ list(tuple) for tuple in tuples]
+                if Fst > Est:
+                    CurentPostBurstySegment.append(CurrentSegment)
+                    Dst = math.sqrt(Nt * Ps * (1 - Ps))
+                    if Fst >= (Est + 2 * Dst):
+                        PBst = 1
+                    else:
+                        PBst = sigmoid(10 * (Fst - (Est + Dst)) / Dst)
+                    Ust = U(AllData, PostSegments, WinNum, CurrentSegment)
+                    WBst = PBst * math.log(Ust) if Ust > 0 else 0
+                    CurentPostBurstyWeight.append(WBst)
 
-                EventSegment_Windowing[-1].append(Seg[0:K])
-                EventSegmentWeight_Windowing[-1].append(Wei[0:K])
-        if len(EventSegment_Windowing[-1]) == 0:
-            del EventSegment_Windowing[-1]
-            del EventSegmentWeight_Windowing[-1]
+            if CurentPostBurstySegment:
+                Nt = len(PostSegments[WinNum])
+                K = math.ceil(math.sqrt(Nt))
 
-    return EventSegment_Windowing,EventSegmentWeight_Windowing
+                zipped_lists = zip(CurentPostBurstyWeight, CurentPostBurstySegment)
+                sorted_pairs = sorted(zipped_lists, reverse=True)
+
+                if sorted_pairs:
+                    tuples = zip(*sorted_pairs)
+                    Wei, Seg = [list(t) for t in tuples]
+                    Window_BurstySegments.append(Seg[0:K])
+                    Window_BurstyWeights.append(Wei[0:K])
+                else:
+                    Window_BurstySegments.append([])
+                    Window_BurstyWeights.append([])
+            else:
+                Window_BurstySegments.append([])
+                Window_BurstyWeights.append([])
+
+        EventSegment_Windowing.append(Window_BurstySegments)
+        EventSegmentWeight_Windowing.append(Window_BurstyWeights)
+
+    return EventSegment_Windowing, EventSegmentWeight_Windowing
 
 def TweetContain(node,CurrentSubWindow):
     res = []
