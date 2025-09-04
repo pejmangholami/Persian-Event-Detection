@@ -1225,7 +1225,8 @@ def EventNewsWorthy_NLastWindow(CondidateEvents,SimilarityGraph,n):
             Graph = SimilarityGraph[WinNum]
             for node1 in ClusterEventSegmentString:
                 for node2 in ClusterEventSegmentString:
-                    SooratKasrDovvom += Graph[node1][node2]['w']['weight']  #or G.edge[node1][node2]['weight']
+                    if Graph.has_edge(node1, node2):
+                        SooratKasrDovvom += Graph[node1][node2]['w']['weight']  #or G.edge[node1][node2]['weight']
 
             MakhrajKasrHa = len(Cluster)#CondidateEvents[WinNum][ClusterNum])
             if(MakhrajKasrHa==0):
@@ -1262,7 +1263,8 @@ def EventNewsWorthy(CondidateEvents,SimilarityGraph):
             Graph = SimilarityGraph[WinNum]
             for node1 in ClusterEventSegmentString:
                 for node2 in ClusterEventSegmentString:
-                    SooratKasrDovvom += Graph[node1][node2]['w']['weight']  #or G.edge[node1][node2]['weight']
+                    if Graph.has_edge(node1, node2):
+                        SooratKasrDovvom += Graph[node1][node2]['w']['weight']  #or G.edge[node1][node2]['weight']
 
             MakhrajKasrHa = len(Cluster)#CondidateEvents[WinNum][ClusterNum])
             if(MakhrajKasrHa==0):
