@@ -1376,7 +1376,8 @@ def Top5Rank(Cluster):
 
 def DescribeEvents_2LastWindow(RealisticEvents):
     TitleToDescribeEvents = []
-    with multiprocessing.Pool(initializer=init_worker) as pool:
+    num_processes = min(os.cpu_count(), 4)
+    with multiprocessing.Pool(processes=num_processes, initializer=init_worker) as pool:
         for WinNum in range(len(RealisticEvents) - 2, len(RealisticEvents)):
             print(f"--- Describing Events for Window {WinNum} ---")
             clusters_to_process = RealisticEvents[WinNum]
@@ -1388,7 +1389,8 @@ def DescribeEvents_2LastWindow(RealisticEvents):
 def DescribeEvents(RealisticEvents):
     TitleToDescribeEvents = []
     # It's more efficient to create the pool once
-    with multiprocessing.Pool(initializer=init_worker) as pool:
+    num_processes = min(os.cpu_count(), 4)
+    with multiprocessing.Pool(processes=num_processes, initializer=init_worker) as pool:
         for WinNum in range(len(RealisticEvents)):
             print(f"--- Describing Events for Window {WinNum+1}/{len(RealisticEvents)} ---")
             clusters_to_process = RealisticEvents[WinNum]
