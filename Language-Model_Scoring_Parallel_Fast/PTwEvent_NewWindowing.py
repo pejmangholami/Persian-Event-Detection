@@ -2376,7 +2376,7 @@ if __name__ == '__main__':
     SaveToExcel(os.path.join(Path, 'ResultsToCompaire_Tereshold15.xls'), AllData[0], AllSequenceAndRelatedEvents)
 
 
-    WindowNum = [1,2,14,15,16,17,18,19,26,31,32,37,38,39,40]
+    WindowNum = AllData[6]
     SaveSystemResultTopic(RealisticEventsTopK,WindowNum,Path)
 
 
