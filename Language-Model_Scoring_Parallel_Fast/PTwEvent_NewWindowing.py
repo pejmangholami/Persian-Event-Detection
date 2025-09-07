@@ -1812,12 +1812,30 @@ def SaveSystemResultTopic(Events,WindowNum,Path):
     book = xlwt.Workbook(encoding="utf-8")
     sheet1 = book.add_sheet("Topic_Systemresult")
 
-    col = 0
-    for i,Topics in enumerate(Events):
-        sheet1.write(0,col, "Window {}".format(WindowNum[i]))
-        for row,topic in enumerate(Topics):
-            sheet1.write(row+1,col, topic)
-        col = col+1
+    # Write headers
+    sheet1.write(0, 0, "Window Number")
+    sheet1.write(0, 1, "Topic")
+
+    row_idx = 1 # Start writing from the second row
+    for i, Topics in enumerate(Events):
+        # Use the actual window number
+        # Handle cases where WindowNum might be nested due to previous buggy code.
+        current_window_num = WindowNum[i]
+        if isinstance(current_window_num, list):
+            # Take the last element if it's a list, assuming it's the intended number
+            current_window_num = current_window_num[-1]
+
+        if not Topics: # Handle cases with no topics for a given window
+            sheet1.write(row_idx, 0, current_window_num)
+            sheet1.write(row_idx, 1, "") # Write empty string for topic
+            row_idx += 1
+        else:
+            for topic in Topics:
+                sheet1.write(row_idx, 0, current_window_num)
+                # topic is a list of segments, join them into a string
+                topic_str = " | ".join(topic)
+                sheet1.write(row_idx, 1, topic_str)
+                row_idx += 1
 
     book.save(Path + r"\Topic_Systemresult.xls")
     print('Result for compute partiale saved in :')
