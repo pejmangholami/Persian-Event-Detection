@@ -27,10 +27,7 @@ import matplotlib.pyplot as plt
 from numpy import dot
 from numpy.linalg import norm
 
-import clr    # install this library by this command : pip install pythonnet   (if yoy have install clr first remove that by: pip uninstall clr)
-#clr.AddReference('{}\\FastTokenizer.dll'.format(os.getcwd()))
-clr.AddReference('{}\\FastTokenizer.dll'.format(os.getcwd()))
-from FastTokenizer import Api
+# clr and FastTokenizer are loaded lazily to support multiprocessing.
 
 # Choose model: 'HooshvareLab/bert-fa-base-uncased' or 'bert-base-multilingual-cased'
 LM_MODEL_NAME = 'HooshvareLab/bert-fa-base-uncased'
@@ -138,6 +135,20 @@ class Buffering:
 NgramBuffer = Buffering()
 WikiPediaBuffer = Buffering()
 #============================================================================
+
+_fast_tokenizer_api = None
+
+def get_fast_tokenizer_api():
+    """Initializes and returns the FastTokenizer API, ensuring it's loaded only once."""
+    global _fast_tokenizer_api
+    if _fast_tokenizer_api is None:
+        print("Initializing FastTokenizer API...")
+        import clr
+        import os
+        clr.AddReference(os.path.join(os.getcwd(), 'FastTokenizer.dll'))
+        from FastTokenizer import Api
+        _fast_tokenizer_api = Api
+    return _fast_tokenizer_api
 
 
 def Stickiness(segment, flag):
@@ -297,6 +308,7 @@ def AssignNodeNameTo_y(G,y):
 
 
 def RemoveSTOPword(text):
+    Api = get_fast_tokenizer_api()
     PatternRemoveStopWord = codecs.open( "C:\\Users\\Pejman\\Desktop\\PhD\\PatternRemoveStopWord.txt", "r", "utf-8" )
     DeletedPatternWord = PatternRemoveStopWord.read()
     DeletedPatternWord = Api.Normalize(DeletedPatternWord)
@@ -407,7 +419,7 @@ def SelectBest(Y,k):
     return Resault
 
 def FastTokenize(text):
-
+    Api = get_fast_tokenizer_api()
     TokenizeTXT = Api.Tokenize(text)
 
     S = []
@@ -869,7 +881,7 @@ def CreatePseudoDoc(T):
     return " ".join(TempList)
 
 
-def calculate_sim_worker(m, node1, node2, CurrentSubWindowing):
+def calculate_sim_for_subwindow(m, node1, node2, CurrentSubWindowing):
     CurrentSubWindow = CurrentSubWindowing[m]
     T1 = TweetContain(node2, CurrentSubWindow)
     T2 = TweetContain(node1, CurrentSubWindow)
@@ -879,26 +891,12 @@ def calculate_sim_worker(m, node1, node2, CurrentSubWindowing):
     Temp2 = SIM(TT1, TT2)
     return Temp1 * Temp2
 
-def CalculateSim(node2, node1, CurrentSubWindowing, pool):
-    worker_func = partial(calculate_sim_worker, node1=node1, node2=node2, CurrentSubWindowing=CurrentSubWindowing)
-    results = pool.map(worker_func, range(len(CurrentSubWindowing)))
-    return sum(results)
-
-def PrepareSimilarityEdge(NodeList, CurrentSubWindowing, pool):
-    edges = {}
-    for node1 in NodeList:
-        for node2 in NodeList:
-            if node1 == node2:
-                edges[(node2, node1)] = 0
-                break
-            else:
-                if (node2, node1) in edges:
-                    continue
-                similarity = CalculateSim(node2, node1, CurrentSubWindowing, pool)
-                edges[(node2, node1)] = similarity
-                edges[(node1, node2)] = similarity
-    return edges
-
+def CalculateSim(node_pair, CurrentSubWindowing):
+    node1, node2 = node_pair
+    total_similarity = 0
+    for m in range(len(CurrentSubWindowing)):
+        total_similarity += calculate_sim_for_subwindow(m, node1, node2, CurrentSubWindowing)
+    return (node1, node2, total_similarity)
 
 def CreateSimilarityGraph(CurrentWindow, CurrentSubWindowing):
     StartTime = datetime.now()
@@ -910,44 +908,36 @@ def CreateSimilarityGraph(CurrentWindow, CurrentSubWindowing):
     for Tweet in CurrentWindow:
         for Segment in Tweet:
             NodeList.append(" ".join(Segment))
+
+    # Remove duplicates
+    NodeList = list(dict.fromkeys(NodeList))
     G.add_nodes_from(NodeList)
 
     print('Node Number: {}'.format(len(NodeList)))
 
-    print('Preparing the Edges ...')
-    with multiprocessing.Pool() as pool:
-        edges_wts = PrepareSimilarityEdge(NodeList, CurrentSubWindowing, pool)
+    print('Preparing and Adding Edges...')
+    from itertools import combinations
 
-    print('Adding Edges To Grapg ...')
-    for k, v in edges_wts.items():
-        tmp_origin, tmp_destination = k[0], k[1]
-        G.add_edge(tmp_origin, tmp_destination, key='w', weight=v, label=v)
+    # Use an iterator instead of a list to save memory
+    node_pairs = combinations(NodeList, 2)
+
+    # Limit the number of processes to avoid overwhelming the system
+    num_processes = min(os.cpu_count(), 8)
+
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        # Create a partial function to pass the CurrentSubWindowing argument
+        worker_func = partial(CalculateSim, CurrentSubWindowing=CurrentSubWindowing)
+
+        # Use imap_unordered for memory efficiency, it processes results as they complete
+        results_iterator = pool.imap_unordered(worker_func, node_pairs)
+
+        print('Adding Edges To Grapg ...')
+        for node1, node2, similarity in results_iterator:
+            if similarity > 0:
+                G.add_edge(node1, node2, key='w', weight=similarity, label=similarity)
+                G.add_edge(node2, node1, key='w', weight=similarity, label=similarity)
 
     print('Time Taken: {}'.format(datetime.now() - StartTime))
-#    nx.draw(G,with_labels=True)
-#    plt.savefig('labels.png')
-
-#    nx.draw(G,with_labels=True)
-#    plt.draw()
-#    plt.show()
-
-#    options = {
-#        'node_color': 'blue',
-#        'node_size': 100,
-#        'width': 3,
-#        'arrowstyle': '-|>',
-#        'arrowsize': 12,
-#    }
-#    nx.draw_networkx(G, arrows=True, **options)
-
-#    val_map = {'A': 1.0,
-#               'D': 0.5714285714285714,
-#               'H': 0.0}
-#    values = [val_map.get(node, 0.25) for node in G.nodes()]
-#    nx.draw(G, cmap = plt.get_cmap('jet'), node_color = values)
-#    plt.show()
-
-
     return G
 
 def ClusteringAlgByParametrTunning(Graph):
@@ -956,7 +946,10 @@ def ClusteringAlgByParametrTunning(Graph):
     DistanceMatrix = np.zeros([n,n])
     WeightMatrix = np.zeros([n,n])
     def weight_func(node1, node2):
-        return Graph[node1][node2]['w']['weight']
+        if Graph.has_edge(node1, node2):
+            return Graph[node1][node2]['w']['weight']
+        else:
+            return 0.0
         #or return G.edge[node1][node2]['weight']
         #or return G.get_edge_data(a,c)[0]['weight']
 
@@ -1063,7 +1056,10 @@ def ClusteringAlg(Graph,k,k_min):
     clusters = []
     noises = {}
     def weight_func(node1, node2):
-        return Graph[node1][node2]['w']['weight']
+        if Graph.has_edge(node1, node2):
+            return Graph[node1][node2]['w']['weight']
+        else:
+            return 0.0
         #or return G.edge[node1][node2]['weight']
         #or return G.get_edge_data(a,c)[0]['weight']
 
@@ -1229,7 +1225,8 @@ def EventNewsWorthy_NLastWindow(CondidateEvents,SimilarityGraph,n):
             Graph = SimilarityGraph[WinNum]
             for node1 in ClusterEventSegmentString:
                 for node2 in ClusterEventSegmentString:
-                    SooratKasrDovvom += Graph[node1][node2]['w']['weight']  #or G.edge[node1][node2]['weight']
+                    if Graph.has_edge(node1, node2):
+                        SooratKasrDovvom += Graph[node1][node2]['w']['weight']  #or G.edge[node1][node2]['weight']
 
             MakhrajKasrHa = len(Cluster)#CondidateEvents[WinNum][ClusterNum])
             if(MakhrajKasrHa==0):
@@ -1266,7 +1263,8 @@ def EventNewsWorthy(CondidateEvents,SimilarityGraph):
             Graph = SimilarityGraph[WinNum]
             for node1 in ClusterEventSegmentString:
                 for node2 in ClusterEventSegmentString:
-                    SooratKasrDovvom += Graph[node1][node2]['w']['weight']  #or G.edge[node1][node2]['weight']
+                    if Graph.has_edge(node1, node2):
+                        SooratKasrDovvom += Graph[node1][node2]['w']['weight']  #or G.edge[node1][node2]['weight']
 
             MakhrajKasrHa = len(Cluster)#CondidateEvents[WinNum][ClusterNum])
             if(MakhrajKasrHa==0):
@@ -1378,7 +1376,8 @@ def Top5Rank(Cluster):
 
 def DescribeEvents_2LastWindow(RealisticEvents):
     TitleToDescribeEvents = []
-    with multiprocessing.Pool(initializer=init_worker) as pool:
+    num_processes = min(os.cpu_count(), 4)
+    with multiprocessing.Pool(processes=num_processes, initializer=init_worker) as pool:
         for WinNum in range(len(RealisticEvents) - 2, len(RealisticEvents)):
             print(f"--- Describing Events for Window {WinNum} ---")
             clusters_to_process = RealisticEvents[WinNum]
@@ -1390,7 +1389,8 @@ def DescribeEvents_2LastWindow(RealisticEvents):
 def DescribeEvents(RealisticEvents):
     TitleToDescribeEvents = []
     # It's more efficient to create the pool once
-    with multiprocessing.Pool(initializer=init_worker) as pool:
+    num_processes = min(os.cpu_count(), 4)
+    with multiprocessing.Pool(processes=num_processes, initializer=init_worker) as pool:
         for WinNum in range(len(RealisticEvents)):
             print(f"--- Describing Events for Window {WinNum+1}/{len(RealisticEvents)} ---")
             clusters_to_process = RealisticEvents[WinNum]
@@ -1812,12 +1812,30 @@ def SaveSystemResultTopic(Events,WindowNum,Path):
     book = xlwt.Workbook(encoding="utf-8")
     sheet1 = book.add_sheet("Topic_Systemresult")
 
-    col = 0
-    for i,Topics in enumerate(Events):
-        sheet1.write(0,col, "Window {}".format(WindowNum[i]))
-        for row,topic in enumerate(Topics):
-            sheet1.write(row+1,col, topic)
-        col = col+1
+    # Write headers
+    sheet1.write(0, 0, "Window Number")
+    sheet1.write(0, 1, "Topic")
+
+    row_idx = 1 # Start writing from the second row
+    for i, Topics in enumerate(Events):
+        # Use the actual window number
+        # Handle cases where WindowNum might be nested due to previous buggy code.
+        current_window_num = WindowNum[i]
+        if isinstance(current_window_num, list):
+            # Take the last element if it's a list, assuming it's the intended number
+            current_window_num = current_window_num[-1]
+
+        if not Topics: # Handle cases with no topics for a given window
+            sheet1.write(row_idx, 0, current_window_num)
+            sheet1.write(row_idx, 1, "") # Write empty string for topic
+            row_idx += 1
+        else:
+            for topic in Topics:
+                sheet1.write(row_idx, 0, current_window_num)
+                # topic is a list of segments, join them into a string
+                topic_str = " | ".join(topic)
+                sheet1.write(row_idx, 1, topic_str)
+                row_idx += 1
 
     book.save(Path + r"\Topic_Systemresult.xls")
     print('Result for compute partiale saved in :')
@@ -2376,7 +2394,7 @@ if __name__ == '__main__':
     SaveToExcel(os.path.join(Path, 'ResultsToCompaire_Tereshold15.xls'), AllData[0], AllSequenceAndRelatedEvents)
 
 
-    WindowNum = [1,2,14,15,16,17,18,19,26,31,32,37,38,39,40]
+    WindowNum = AllData[6]
     SaveSystemResultTopic(RealisticEventsTopK,WindowNum,Path)
 
 
