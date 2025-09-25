@@ -1811,13 +1811,17 @@ def CalculateEntropy(AllSequenceAndRelatedEvents,WinNum):
 
 
 
-def get_param_stamped_filename(base_name, params, extension):
+def get_param_stamped_filename(base_name, param_dict, extension):
     """
-    Generates a filename with a stamp of the current parameters.
-    Example: RealisticEvents_u5_k15_kmin6_T15_KV5.npy
+    Generates a filename with a stamp of the given parameters.
+    Example: RealisticEvents_u-5_k-15.npy
     """
-    p_u, p_e, p_k, p_kmin, p_t, p_kv = params
-    stamp = f"_u{p_u}_e{p_e}_k{p_k}_kmin{p_kmin}_T{int(p_t)}_KV{p_kv}"
+    stamp = ""
+    for key, value in param_dict.items():
+        # Sanitize key for filename
+        sanitized_key = key.replace('PARAM_', '').replace('_VALUES', '').lower()
+        stamp += f"_{sanitized_key}-{value}"
+
     return f"{base_name}{stamp}.{extension}"
 
 def SaveSystemResultTopic(Events,WindowNum,FullPath):
@@ -1923,21 +1927,17 @@ if __name__ == '__main__':
         print(f"PARAMETERS: u={PARAM_U}, e={PARAM_E}, k={PARAM_K}, k_min={PARAM_K_MIN}, Tereshold={PARAM_TERESHOLD}, K_Value={PARAM_K_VALUE}")
         print("="*80 + "\n")
 
-        # AllData Contain :
-        #        Seq_Windowing,
-        #        Posts_Windowing,
-        #        Types_Windowing,
-        #        Deleted_Windowing,
-        #        DateSend_Windowing,
-        #        User_Windowing,
-        #        WindowNum
+        # Define parameter dictionaries for each stage to ensure correct caching
+        segmentation_params = {'u': PARAM_U, 'e': PARAM_E}
+        bursty_params = {'u': PARAM_U, 'e': PARAM_E}
+        similarity_params = {'u': PARAM_U, 'e': PARAM_E, 'step_time_hours': PARAM_STEP_TIME_HOURS}
+        clustering_params = {'u': PARAM_U, 'e': PARAM_E, 'step_time_hours': PARAM_STEP_TIME_HOURS, 'k': PARAM_K, 'k_min': PARAM_K_MIN}
+        miu_params = {'u': PARAM_U, 'e': PARAM_E, 'step_time_hours': PARAM_STEP_TIME_HOURS, 'k': PARAM_K, 'k_min': PARAM_K_MIN}
+        realistic_events_params = {'u': PARAM_U, 'e': PARAM_E, 'step_time_hours': PARAM_STEP_TIME_HOURS, 'k': PARAM_K, 'k_min': PARAM_K_MIN, 'tereshold': PARAM_TERESHOLD}
+        final_params = {'u': PARAM_U, 'e': PARAM_E, 'step_time_hours': PARAM_STEP_TIME_HOURS, 'k': PARAM_K, 'k_min': PARAM_K_MIN, 'tereshold': PARAM_TERESHOLD, 'k_value': PARAM_K_VALUE}
 
-
-        # The following sections are now uncommented to generate data on the fly,
-        # instead of loading from pre-computed files.
-
-        #Segment kardane post ha (Az SCP Estefade shode)
-        posts_segments_path = os.path.join(Path, get_param_stamped_filename('PostsSegments_Windowing', params, 'npy'))
+        #Segment kardane post ha
+        posts_segments_path = os.path.join(Path, get_param_stamped_filename('PostsSegments_Windowing', segmentation_params, 'npy'))
         if os.path.exists(posts_segments_path):
             print(f'Loading PostsSegments_Windowing from file: {posts_segments_path}')
             PostsSegments_Windowing = np.load(posts_segments_path, allow_pickle=True).tolist()
@@ -1948,181 +1948,47 @@ if __name__ == '__main__':
             print(f'\n PostsSegments_Windowing Saved to {posts_segments_path}')
 
         #Detect Bursty Segment
-        event_segment_path = os.path.join(Path, get_param_stamped_filename('EventSegment_Windowing', params, 'npy'))
-        event_segment_weight_path = os.path.join(Path, get_param_stamped_filename('EventSegmentWeight_Windowing', params, 'npy'))
-        if os.path.exists(event_segment_path) and os.path.exists(event_segment_weight_path):
-            print(f'Loading EventSegment and EventSegmentWeight from file...')
+        event_segment_path = os.path.join(Path, get_param_stamped_filename('EventSegment_Windowing', bursty_params, 'npy'))
+        event_weight_path = os.path.join(Path, get_param_stamped_filename('EventSegmentWeight_Windowing', bursty_params, 'npy'))
+        if os.path.exists(event_segment_path) and os.path.exists(event_weight_path):
+            print(f'Loading EventSegment and weights from files...')
             EventSegment_Windowing = np.load(event_segment_path, allow_pickle=True).tolist()
-            EventSegmentWeight_Windowing = np.load(event_segment_weight_path, allow_pickle=True).tolist()
+            EventSegmentWeight_Windowing = np.load(event_weight_path, allow_pickle=True).tolist()
         else:
             print("Detecting bursty segments...")
-            EventSegment_Windowing,EventSegmentWeight_Windowing = DetectBursty(AllData,PostsSegments_Windowing)
-            #EventSegment is TweetsBurstySegments
+            EventSegment_Windowing, EventSegmentWeight_Windowing = DetectBursty(AllData, PostsSegments_Windowing)
             np.save(event_segment_path, np.array(EventSegment_Windowing, dtype=object), allow_pickle=True)
-            print(f'\n EventSegment_Windowing Saved to {event_segment_path}')
-            np.save(event_segment_weight_path, np.array(EventSegmentWeight_Windowing, dtype=object), allow_pickle=True)
-            print(f'\n EventSegmentWeight_Windowing Saved to {event_segment_weight_path}')
+            np.save(event_weight_path, np.array(EventSegmentWeight_Windowing, dtype=object), allow_pickle=True)
+            print(f'\nSaved EventSegment and weights to {event_segment_path} and {event_weight_path}')
 
-        #
-        #################################################################################################################
-        #
-        #EventSegment_Windowing_2LastWindow,EventSegmentWeight_Windowing_2LastWindow = DetectBurstyNLastWindow(AllData,PostsSegments_Windowing,13)
-        #
-        #EventSegment_Windowing = [*EventSegment_Windowing ,*EventSegment_Windowing_2LastWindow ]
-        #EventSegmentWeight_Windowing = [*EventSegmentWeight_Windowing ,*EventSegmentWeight_Windowing_2LastWindow ]
-        #
-        #np.save(os.path.join(Path,'EventSegment_Windowing.npy'),EventSegment_Windowing)
-        #print('\n EventSegment_Windowing Saved')
-        #np.save(os.path.join(Path,'EventSegmentWeight_Windowing.npy'),EventSegmentWeight_Windowing)
-        #print('\n EventSegmentWeight_Windowing Saved')
-        #
-        #################################################################################################################
-        #
-
-        # This part requires a StartTime variable which was defined in the commented out SQL block.
-        # I will define it here.
+        # This part requires a StartTime variable.
         StartTime = datetime(2017, 1,  1, 00, 00, 00)
 
-        similarity_graph_path = os.path.join(Path, get_param_stamped_filename('SimilarityGraph', params, 'npy'))
+        #Similarity Graph
+        similarity_graph_path = os.path.join(Path, get_param_stamped_filename('SimilarityGraph', similarity_params, 'npy'))
         if os.path.exists(similarity_graph_path):
             print(f'Loading SimilarityGraph from file: {similarity_graph_path}')
             SimilarityGraph = np.load(similarity_graph_path, allow_pickle=True).tolist()
         else:
             print("Clustering event segments...")
-            StepTime = timedelta(hours=PARAM_STEP_TIME_HOURS) # timedelta(days=1)
+            StepTime = timedelta(hours=PARAM_STEP_TIME_HOURS)
             SimilarityGraph = EventSegmentClustering_Similarity(AllData,EventSegment_Windowing,StartTime,StepTime)
-            # Condedate Evente is clysters of segment in each time window
             np.save(similarity_graph_path, np.array(SimilarityGraph, dtype=object), allow_pickle=True)
             print(f'\n SimilarityGraph Saved to {similarity_graph_path}')
 
-        #
-        #################################################################################################################
-        #SimilarityGraph_2LastWindow = EventSegmentClustering_Similarity_NLastWindow(EventSegment_Windowing,13)
-        #
-        #SimilarityGraph = [*SimilarityGraph ,*SimilarityGraph_2LastWindow ]
-        #
-        #np.save(os.path.join(Path,'SimilarityGraph.npy'),SimilarityGraph)
-        #print('\n SimilarityGraph Saved')
-        #
-        #################################################################################################################
-        #
-
-
-        #############EvaluateAfterClusteringComplete
-        condidate_events_path = os.path.join(Path, get_param_stamped_filename('CondidateEvents', params, 'npy'))
+        #Clustering
+        condidate_events_path = os.path.join(Path, get_param_stamped_filename('CondidateEvents', clustering_params, 'npy'))
         if os.path.exists(condidate_events_path):
             print(f'Loading CondidateEvents from file: {condidate_events_path}')
-            CondidateEvents = np.load(condidate_events_path, allow_pickle=True).tolist()
+            CondidateEvents, NoiseS = np.load(condidate_events_path, allow_pickle=True)
         else:
             print("Clustering started...")
-            CondidateEvents,NoiseS = EventSegmentClustering(SimilarityGraph,EventSegment_Windowing,PARAM_K,PARAM_K_MIN)      # CondidateEvents,KList,KMinList,S_Score = EventSegmentClusteringByParametrTunning(SimilarityGraph,EventSegment_Windowing)
-            np.save(condidate_events_path, np.array(CondidateEvents, dtype=object), allow_pickle=True)
+            CondidateEvents,NoiseS = EventSegmentClustering(SimilarityGraph,EventSegment_Windowing,PARAM_K,PARAM_K_MIN)
+            np.save(condidate_events_path, np.array((CondidateEvents, NoiseS), dtype=object), allow_pickle=True)
             print(f'\n CondidateEvents Saved to {condidate_events_path}')
 
-
-        ##SaveToExcellK_value(os.path.join(Path,'KvalueBySiluhette.xls'),KList,KMinList,S_Score,"Silh")   # if run Bt Parametr tuning in line 2519
-
-
-        """##############################################################################
-
-
-
-
-
-
-
-
-
-        #############EvaluateAfterDetectRealisticEvent
-        KList=[]
-        KMinList=[]
-        S_Score_After=[]
-        Class_E=[]
-        Cluster_E=[]
-        Entropy_Measure=[]
-
-        K=50
-        MaxK = 118
-
-
-        ####################Only Window 14 for Speed test###################################3
-        WINDOWNUMBER = 15
-        start=1
-        end=2
-
-        AllData[0] = AllData[0][start:end]
-        AllData[1] = AllData[1][start:end]
-        AllData[2] = AllData[2][start:end]
-        AllData[3] = AllData[3][start:end]
-        AllData[4] = AllData[4][start:end]
-        AllData[5] = AllData[5][start:end]
-        AllData[6] = AllData[6][start:end]
-        PostsSegments_Windowing = PostsSegments_Windowing[start:end]
-        EventSegment_Windowing = EventSegment_Windowing[start:end]
-        EventSegmentWeight_Windowing = EventSegmentWeight_Windowing[start:end]
-        SimilarityGraph = SimilarityGraph[start:end]
-        #######################################################3
-
-
-        for k in range(K,MaxK):
-            print("Process Start By K:{}".format(k))
-            for k_min in range(1,k):
-
-                CondidateEvents,NoiseS = EventSegmentClustering(SimilarityGraph,EventSegment_Windowing,k,k_min)
-
-                MiuE = EventNewsWorthy(CondidateEvents,SimilarityGraph)
-                MiuX = HighestNewsWorthy(MiuE,CondidateEvents)
-
-                RealisticEvents = DetectRealisticEvents(MiuX,MiuE,PARAM_TERESHOLD,CondidateEvents)
-
-                RelatedDocuments,RelatedSequence = DetectRelatedDoc(AllData,PostsSegments_Windowing,RealisticEvents)
-
-                EventNumberOfEachSequence = DetectEventOfEachPost(RelatedSequence)
-                AllSequenceAndRelatedEvents = ReadyToWriteToExcell(AllData,EventNumberOfEachSequence)
-
-
-                for WinNum in range(len(MiuX)):
-                    if len(KList) == WinNum:
-                        KList.append([])
-                        KMinList.append([])
-                        S_Score_After.append([])
-                        Class_E.append([])
-                        Cluster_E.append([])
-                        Entropy_Measure.append([])
-
-                    KList[WinNum].append(k)
-                    KMinList[WinNum].append(k_min)
-                    S_Score_After[WinNum].append(CalculateSiluhet(RealisticEvents[WinNum],SimilarityGraph[WinNum]))
-                    classE,clusterE = CalculateEntropy(AllSequenceAndRelatedEvents,WINDOWNUMBER) #Or WinNum for total process
-
-                    Class_E[WinNum].append(classE)
-                    Cluster_E[WinNum].append(clusterE)
-                    Entropy_Measure[WinNum].append((2*classE*clusterE)/(classE+clusterE))
-
-
-
-
-        SaveToExcellK_value(os.path.join(Path,'KvalueBySiluhetteAfterAllProcesss_'+str(WINDOWNUMBER)+'.xls'),KList,KMinList,S_Score_After,'SiluhetteAfter')
-        SaveToExcellK_value(os.path.join(Path,'KvalueByClassEntropy_'+str(WINDOWNUMBER)+'.xls'),KList,KMinList,Class_E,'ClassEntropy')
-        SaveToExcellK_value(os.path.join(Path,'KvalueByClusterEntropy_'+str(WINDOWNUMBER)+'.xls'),KList,KMinList,Cluster_E,'ClusterEntropy')
-        SaveToExcellK_value(os.path.join(Path,'KvalueByTotalEntropyMeasure_'+str(WINDOWNUMBER)+'.xls'),KList,KMinList,Entropy_Measure,'EntropyMeasure')
-
-
-
-
-
-        """##############################################################################
-
-
-
-
-
-
-
-
-
-
-        miue_path = os.path.join(Path, get_param_stamped_filename('MiuE', params, 'npy'))
+        #Newsworthiness
+        miue_path = os.path.join(Path, get_param_stamped_filename('MiuE', miu_params, 'npy'))
         if os.path.exists(miue_path):
             print(f'Loading MiuE from file: {miue_path}')
             MiuE = np.load(miue_path, allow_pickle=True).tolist()
@@ -2132,7 +1998,7 @@ if __name__ == '__main__':
             np.save(miue_path, np.array(MiuE, dtype=object), allow_pickle=True)
             print(f'\n MiuE Saved to {miue_path}')
 
-        miux_path = os.path.join(Path, get_param_stamped_filename('MiuX', params, 'npy'))
+        miux_path = os.path.join(Path, get_param_stamped_filename('MiuX', miu_params, 'npy'))
         if os.path.exists(miux_path):
             print(f'Loading MiuX from file: {miux_path}')
             MiuX = np.load(miux_path, allow_pickle=True).tolist()
@@ -2142,8 +2008,8 @@ if __name__ == '__main__':
             np.save(miux_path, np.array(MiuX, dtype=object), allow_pickle=True)
             print(f'\n MiuX Saved to {miux_path}')
 
-        #->>>>>>      AZ INJA BE BAD HATMAN ESME File Hayi Ke SAVE Mishe Cheack Shavad
-        realistic_events_path = os.path.join(Path, get_param_stamped_filename('RealisticEvents', params, 'npy'))
+        #Realistic Events
+        realistic_events_path = os.path.join(Path, get_param_stamped_filename('RealisticEvents', realistic_events_params, 'npy'))
         if os.path.exists(realistic_events_path):
             print(f'Loading RealisticEvents from file: {realistic_events_path}')
             RealisticEvents = np.load(realistic_events_path, allow_pickle=True).tolist()
@@ -2153,7 +2019,7 @@ if __name__ == '__main__':
             np.save(realistic_events_path, np.array(RealisticEvents, dtype=object), allow_pickle=True)
             print(f'\n RealisticEvents Saved to {realistic_events_path}')
 
-        realistic_events_topk_path = os.path.join(Path, get_param_stamped_filename('RealisticEventsTopK', params, 'npy'))
+        realistic_events_topk_path = os.path.join(Path, get_param_stamped_filename('RealisticEventsTopK', final_params, 'npy'))
         if os.path.exists(realistic_events_topk_path):
             print(f'Loading RealisticEventsTopK from file: {realistic_events_topk_path}')
             RealisticEventsTopK = np.load(realistic_events_topk_path, allow_pickle=True).tolist()
@@ -2163,7 +2029,8 @@ if __name__ == '__main__':
             np.save(realistic_events_topk_path, np.array(RealisticEventsTopK, dtype=object), allow_pickle=True)
             print(f'\n RealisticEventsTopK Saved to {realistic_events_topk_path}')
 
-        title_to_describe_path = os.path.join(Path, get_param_stamped_filename('TitleToDescribeEventsSTR', params, 'npy'))
+        #Final Reports
+        title_to_describe_path = os.path.join(Path, get_param_stamped_filename('TitleToDescribeEventsSTR', realistic_events_params, 'npy'))
         if os.path.exists(title_to_describe_path):
             print(f'Loading TitleToDescribeEventsSTR from file: {title_to_describe_path}')
             TitleToDescribeEventsSTR = np.load(title_to_describe_path, allow_pickle=True).tolist()
@@ -2173,21 +2040,20 @@ if __name__ == '__main__':
             np.save(title_to_describe_path, np.array(TitleToDescribeEventsSTR, dtype=object), allow_pickle=True)
             print(f'\n TitleToDescribeEvents Saved to {title_to_describe_path}')
 
-        related_docs_path = os.path.join(Path, get_param_stamped_filename('RelatedDocuments', params, 'npy'))
-        related_seq_path = os.path.join(Path, get_param_stamped_filename('RelatedSequence', params, 'npy'))
+        related_docs_path = os.path.join(Path, get_param_stamped_filename('RelatedDocuments', realistic_events_params, 'npy'))
+        related_seq_path = os.path.join(Path, get_param_stamped_filename('RelatedSequence', realistic_events_params, 'npy'))
         if os.path.exists(related_docs_path) and os.path.exists(related_seq_path):
-            print('Loading RelatedDocuments and RelatedSequence from file...')
+            print(f"Loading related documents from {related_docs_path}")
             RelatedDocuments = np.load(related_docs_path, allow_pickle=True).tolist()
             RelatedSequence = np.load(related_seq_path, allow_pickle=True).tolist()
         else:
             print("Detecting related documents...")
-            RelatedDocuments,RelatedSequence = DetectRelatedDoc(AllData,PostsSegments_Windowing,RealisticEvents)
+            RelatedDocuments, RelatedSequence = DetectRelatedDoc(AllData, PostsSegments_Windowing, RealisticEvents)
             np.save(related_docs_path, np.array(RelatedDocuments, dtype=object), allow_pickle=True)
-            print(f'\n RelatedDocuments Saved to {related_docs_path}')
             np.save(related_seq_path, np.array(RelatedSequence, dtype=object), allow_pickle=True)
-            print(f'\n RelatedSequence Saved to {related_seq_path}')
+            print(f"Saved related documents and sequences.")
 
-        related_docs_string_path = os.path.join(Path, get_param_stamped_filename('RelatedDocumentsString', params, 'npy'))
+        related_docs_string_path = os.path.join(Path, get_param_stamped_filename('RelatedDocumentsString', realistic_events_params, 'npy'))
         if os.path.exists(related_docs_string_path):
             print(f'Loading RelatedDocumentsString from file: {related_docs_string_path}')
             RelatedDocumentsString = np.load(related_docs_string_path, allow_pickle=True).tolist()
@@ -2200,18 +2066,9 @@ if __name__ == '__main__':
         EventNumberOfEachSequence = DetectEventOfEachPost(RelatedSequence)
         AllSequenceAndRelatedEvents = ReadyToWriteToExcell(AllData,EventNumberOfEachSequence)
 
-        results_excel_path = os.path.join(Path, get_param_stamped_filename('ResultsToCompaire', params, 'xls'))
+        results_excel_path = os.path.join(Path, get_param_stamped_filename('ResultsToCompaire', final_params, 'xls'))
         SaveToExcel(results_excel_path, AllData[0], AllSequenceAndRelatedEvents)
 
         WindowNum = AllData[6]
-        topic_excel_path = os.path.join(Path, get_param_stamped_filename('Topic_Systemresult', params, 'xls'))
+        topic_excel_path = os.path.join(Path, get_param_stamped_filename('Topic_Systemresult', final_params, 'xls'))
         SaveSystemResultTopic(RealisticEventsTopK,WindowNum,topic_excel_path)
-
-
-
-
-
-
-
-
-    #"""##############################################################################
