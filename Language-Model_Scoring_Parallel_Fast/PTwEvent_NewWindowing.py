@@ -34,11 +34,11 @@ LM_MODEL_NAME = 'HooshvareLab/bert-fa-base-uncased'
 lm_scorer = None
 
 class LanguageModelScorer:
-    def __init__(self, model_name='HooshvareLab/bert-fa-base-uncased'):
-        print(f"Loading tokenizer for {model_name}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        print(f"Loading model {model_name}...")
-        self.model = AutoModelForMaskedLM.from_pretrained(model_name)
+    def __init__(self, model_name='HooshvareLab/bert-fa-base-uncased', local_files_only=False):
+        print(f"Loading tokenizer for {model_name} (offline: {local_files_only})...")
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=local_files_only)
+        print(f"Loading model {model_name} (offline: {local_files_only})...")
+        self.model = AutoModelForMaskedLM.from_pretrained(model_name, local_files_only=local_files_only)
         self.model.eval()
         self.cache = {}
         print("Model loaded.")
@@ -88,12 +88,12 @@ class LanguageModelScorer:
         self.cache[text] = score
         return score
 
-def initialize_lm_scorer():
+def initialize_lm_scorer(offline_mode=False):
     global lm_scorer
     if lm_scorer is None:
-        print(f"Initializing language model: {LM_MODEL_NAME}...")
-        lm_scorer = LanguageModelScorer(LM_MODEL_NAME)
-        print("Language model initialized.")
+        print(f"Initializing language model for main process (offline: {offline_mode})...")
+        lm_scorer = LanguageModelScorer(LM_MODEL_NAME, local_files_only=offline_mode)
+        print("Language model initialized for main process.")
 
 global nof
 nof = 1
@@ -592,12 +592,12 @@ def ReadData(Start,End):
 
 
 
-def init_worker():
+def init_worker(offline_mode=False):
     global lm_scorer
     # This function will be called by each worker process.
     # It initializes the language model scorer for that process.
     print(f"Initializing language model for worker (pid: {os.getpid()})...")
-    lm_scorer = LanguageModelScorer(LM_MODEL_NAME)
+    lm_scorer = LanguageModelScorer(LM_MODEL_NAME, local_files_only=offline_mode)
 
 def segment_tweet_worker(tweet, u, e):
     if not tweet:
@@ -616,21 +616,21 @@ def segment_tweet_worker(tweet, u, e):
         return TempSegment
     return []
 
-def Segmentation(Tweets, u, e):
+def Segmentation(Tweets, u, e, offline_mode=False):
     SegmentationResults_Windowing = []
 
     # Determine the number of processes to use
     num_processes = min(os.cpu_count(), 8) # Limit to 8 processes to avoid excessive memory usage
 
     # Initialize the language model scorer in the main process
-    initialize_lm_scorer()
+    initialize_lm_scorer(offline_mode=offline_mode)
 
     # Create a partial function to pass the fixed u and e parameters to the worker
     worker_func = partial(segment_tweet_worker, u=u, e=e)
 
 
     # Use a multiprocessing pool to parallelize the segmentation
-    with multiprocessing.Pool(processes=num_processes, initializer=init_worker) as pool:
+    with multiprocessing.Pool(processes=num_processes, initializer=init_worker, initargs=(PARAM_FORCE_OFFLINE,)) as pool:
         for WinNum in range(len(Tweets)):
             print(f"--- Processing Window {WinNum+1}/{len(Tweets)} ---")
 
@@ -1390,11 +1390,11 @@ def DescribeEvents_2LastWindow(RealisticEvents):
     return TitleToDescribeEvents
 
 
-def DescribeEvents(RealisticEvents):
+def DescribeEvents(RealisticEvents, offline_mode=False):
     TitleToDescribeEvents = []
     # It's more efficient to create the pool once
     num_processes = min(os.cpu_count(), 4)
-    with multiprocessing.Pool(processes=num_processes, initializer=init_worker) as pool:
+    with multiprocessing.Pool(processes=num_processes, initializer=init_worker, initargs=(offline_mode,)) as pool:
         for WinNum in range(len(RealisticEvents)):
             print(f"--- Describing Events for Window {WinNum+1}/{len(RealisticEvents)} ---")
             clusters_to_process = RealisticEvents[WinNum]
@@ -1894,6 +1894,7 @@ if __name__ == '__main__':
 
     # -- Single-value parameters (not iterated over in this setup) --
     PARAM_STEP_TIME_HOURS = 4  # Duration of each processing window in hours
+    PARAM_FORCE_OFFLINE = False # Set to True to force offline mode after initial download
     # =============================================================================
 
     # --- Create all combinations of parameters ---
@@ -1911,7 +1912,7 @@ if __name__ == '__main__':
     print('Loading AllData ...')
     tempNumpyArray = np.load(os.path.join('../Language-Model_Scoring', 'AllData.npy'), allow_pickle=True)
     AllData_original = tempNumpyArray.tolist()
-    initialize_lm_scorer()
+    initialize_lm_scorer(offline_mode=PARAM_FORCE_OFFLINE)
 
 
     # --- Main loop to run the pipeline for each parameter combination ---
@@ -1943,7 +1944,7 @@ if __name__ == '__main__':
             PostsSegments_Windowing = np.load(posts_segments_path, allow_pickle=True).tolist()
         else:
             print("Segmenting posts...")
-            PostsSegments_Windowing = Segmentation(AllData[1], u=PARAM_U, e=PARAM_E)
+            PostsSegments_Windowing = Segmentation(AllData[1], u=PARAM_U, e=PARAM_E, offline_mode=PARAM_FORCE_OFFLINE)
             np.save(posts_segments_path, np.array(PostsSegments_Windowing, dtype=object), allow_pickle=True)
             print(f'\n PostsSegments_Windowing Saved to {posts_segments_path}')
 
@@ -2036,7 +2037,7 @@ if __name__ == '__main__':
             TitleToDescribeEventsSTR = np.load(title_to_describe_path, allow_pickle=True).tolist()
         else:
             print("Describing events...")
-            TitleToDescribeEventsSTR = DescribeEvents(RealisticEvents)
+            TitleToDescribeEventsSTR = DescribeEvents(RealisticEvents, offline_mode=PARAM_FORCE_OFFLINE)
             np.save(title_to_describe_path, np.array(TitleToDescribeEventsSTR, dtype=object), allow_pickle=True)
             print(f'\n TitleToDescribeEvents Saved to {title_to_describe_path}')
 
