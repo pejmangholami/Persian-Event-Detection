@@ -259,7 +259,11 @@ def standardize_results(raw_results_path, all_data_path, standardized_results_pa
             sequence_text = all_data.get(seq_id, "")
             window_topics = topics_by_window.get(window_num, set())
 
-            matched_topics = [topic for topic in window_topics if topic in sequence_text]
+            # A topic is matched if all of its words are present in the sequence text
+            matched_topics = [
+                topic for topic in window_topics
+                if all(word in sequence_text for word in topic.split())
+            ]
             assigned_titles.append(','.join(matched_topics))
 
         labels_df['title'] = assigned_titles
@@ -350,16 +354,16 @@ def Matched_To_GS(GS,event_str):
     return False
 
 def Matched_To_GS_WordCount(GS,event_str):
-    WM=0
-    WT=0
+    WM=0 # Word Matched
     words = event_str.split(' ')
-    for gs_string_ in GS:
-        gs_string = gs_string_[0]
-        for w in words:
-            if w in gs_string:
-                WM+=gs_string.count(w)
-                WT+=len(words)
-                break
+    WT=len(words) # Word Total
+
+    gs_text = ' '.join([s[0] for s in GS])
+
+    for w in words:
+        if w in gs_text:
+            WM+=1
+
     return WM,WT
 
 def IsCorrectDetect(SR,topic_str):
@@ -372,16 +376,16 @@ def IsCorrectDetect(SR,topic_str):
     return False
 
 def IsCorrectDetect_WordCount(SR,topic_str):
-    WM=0
-    WT=0
+    WM=0 # Word Matched
     words = topic_str[0].split(' ')
-    for event_i,event_list in enumerate(SR):
-        event_str = ' '.join(event_list)
-        for w in words:
-            if w in event_str:
-                WM+=event_str.count(w)
-                WT+=len(words)
-                break
+    WT=len(words) # Word Total
+
+    sr_text = ' '.join([' '.join(event_list) for event_list in SR])
+
+    for w in words:
+        if w in sr_text:
+            WM+=1
+
     return WM,WT
 
 
