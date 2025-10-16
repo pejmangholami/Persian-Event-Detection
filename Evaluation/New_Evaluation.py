@@ -8,8 +8,16 @@ import pandas as pd
 import numpy as np
 import glob
 from openpyxl import load_workbook
+import re
 import EvaluateFunctional as Eval
 from math import log
+
+def normalize_text(text):
+    """A simple text normalizer for Persian."""
+    text = re.sub(r'[^\w\s]', '', text) # Remove punctuation
+    text = text.replace('ي', 'ی')
+    text = text.replace('ك', 'ک')
+    return text
 
 def append(a,b):
     c = np.empty(len(a)+1, dtype=object)
@@ -179,47 +187,50 @@ def PrepareData_new(GoldenStandard,SystemResult):
 
 def standardize_results(raw_results_path, all_data_path, standardized_results_path):
     """
-    Reads raw result files (labels and topics) and standardizes them into a single format.
-
-    Args:
-        raw_results_path (str): Path to the directory containing raw result files.
-        all_data_path (str): Path to the AllData.npy file.
-        standardized_results_path (str): Path to save the standardized results.
-
-    Returns:
-        dict: A dictionary where keys are parameter sets and values are paths to standardized DataFrames.
+    Reads raw result files and standardizes them based on the correct logic:
+    1. Create a map from Window Number -> Set of Titles.
+    2. For each sequence, find its window's titles and search them in the sequence's full text.
     """
     if not os.path.exists(standardized_results_path):
         os.makedirs(standardized_results_path)
 
-    # Load AllData.npy and create a sequence_id -> text mapping
+    # 1. Load AllData.npy to get sequence full texts
     loaded_data = np.load(all_data_path, allow_pickle=True)
-    all_data = {}
+    sequence_to_text = {}
     sequence_ids_windows = loaded_data[0]
     sequence_texts_windows = loaded_data[1]
-
     for i in range(len(sequence_ids_windows)):
         for j in range(len(sequence_ids_windows[i])):
             seq_id = sequence_ids_windows[i][j]
-            seq_text = " ".join(sequence_texts_windows[i][j])
-            all_data[seq_id] = seq_text
+            sequence_to_text[seq_id] = " ".join(sequence_texts_windows[i][j])
 
-    # Get all result files
+    # --- Process each parameter set ---
     label_files = glob.glob(os.path.join(raw_results_path, "ResultsToCompaire_*.xls"))
-
     standardized_files = {}
 
     for label_file in label_files:
-        param_string = label_file.split("ResultsToCompaire_")[1].replace(".xls", "")
-        topic_file = os.path.join(raw_results_path, f"Topic_Systemresult_{param_string}.xls")
+        param_string = os.path.basename(label_file).split("ResultsToCompaire_")[1].replace(".xls", "")
+        topic_file_path = os.path.join(raw_results_path, f"Topic_Systemresult_{param_string}.xls")
 
-        if not os.path.exists(topic_file):
+        if not os.path.exists(topic_file_path):
             print(f"Warning: Topic file not found for {param_string}")
             continue
 
         print(f"Processing parameters: {param_string}")
 
-        # Read label file
+        # 2. Build the Window -> Set of Titles map
+        topic_xls = pd.ExcelFile(topic_file_path)
+        window_to_titles_map = {}
+        df_topics = topic_xls.parse(topic_xls.sheet_names[0], header=0)
+        win_col = df_topics.columns[0]
+        title_col = df_topics.columns[1]
+        for window_num, group in df_topics.groupby(win_col):
+            all_titles = set()
+            for titles_str in group[title_col].dropna():
+                all_titles.update(t.strip() for t in str(titles_str).split('|'))
+            window_to_titles_map[window_num] = all_titles
+
+        # 3. Read Label File and assign titles
         label_xls = pd.ExcelFile(label_file)
         all_sheets_data = []
         for sheet_name in label_xls.sheet_names:
@@ -228,49 +239,40 @@ def standardize_results(raw_results_path, all_data_path, standardized_results_pa
             all_sheets_data.append(df)
 
         labels_df = pd.concat(all_sheets_data, ignore_index=True)
+        event_col_name = [col for col in labels_df.columns if 'EventNumber' in col][0]
         labels_df.rename(columns={
             labels_df.columns[0]: 'sequence',
-            'EventNumber(Clustering)': 'EventNumber',
-            'EventNumber(Community)': 'EventNumber'
-        }, inplace=True, errors='ignore')
+            event_col_name: 'EventNumber'
+        }, inplace=True)
 
-        # Read topic file
-        topic_xls = pd.ExcelFile(topic_file)
-        topics_by_window = {}
-        for sheet_name in topic_xls.sheet_names:
-            if 'window' in sheet_name:
-                window_num = int(sheet_name.split('-')[-1])
-            else:
-                # Handle cases where sheet name is not in the expected format
-                continue
-            df = topic_xls.parse(sheet_name)
-            # Read all topics, splitting by '|'
-            topics = set()
-            for item in df.iloc[0:, 0].dropna().astype(str):
-                topics.update(topic.strip() for topic in item.split('|'))
-            topics_by_window[window_num] = topics
+        # 3. Clean up and normalize the EventNumber column
+        def clean_event_number(event):
+            try:
+                # Take the first number if it's a comma-separated string
+                s_event = str(event).split(',')[0]
+                return int(s_event)
+            except (ValueError, TypeError):
+                return -1 # Return a value that won't match
 
-        # Assign topics to sequences
-        assigned_titles = []
-        for _, row in labels_df.iterrows():
+        labels_df['EventNumber'] = labels_df['EventNumber'].apply(clean_event_number)
+
+        # 3. Assign titles using the per-window map
+        def find_and_assign_titles(row):
             seq_id = row['sequence']
             window_num = row['window']
 
-            sequence_text = all_data.get(seq_id, "")
-            window_topics = topics_by_window.get(window_num, set())
+            seq_text = sequence_to_text.get(seq_id, "")
+            candidate_titles = window_to_titles_map.get(window_num, set())
 
-            # A topic is matched if all of its words are present in the sequence text
-            matched_topics = [
-                topic for topic in window_topics
-                if all(word in sequence_text for word in topic.split())
-            ]
-            assigned_titles.append(','.join(matched_topics))
+            found_titles = [title for title in candidate_titles if title in seq_text]
+            return '|'.join(found_titles)
 
-        labels_df['title'] = assigned_titles
+        labels_df['title'] = labels_df.apply(find_and_assign_titles, axis=1)
 
-        # Save standardized file
+        # 4. Save standardized file
         output_path = os.path.join(standardized_results_path, f"standardized_{param_string}.xlsx")
-        labels_df.to_excel(output_path, index=False)
+        final_df = labels_df[['sequence', 'EventNumber', 'window', 'title']]
+        final_df.to_excel(output_path, index=False)
         standardized_files[param_string] = output_path
 
     return standardized_files
@@ -306,9 +308,9 @@ def evaluate_standardized_results(standardized_files, golden_standard_path):
         system_result_for_eval = np.array([
             system_results_df['sequence'].values,
             system_results_df['EventNumber'].apply(lambda x: np.array([int(i) for i in str(x).split(',')])).values, # Clustering Label
-            system_results_df['title'].apply(lambda x: np.array(str(x).split(','))).values, # Clustering Title
+            system_results_df['title'].apply(lambda x: np.array(str(x).split('|')) if pd.notna(x) and x else np.array([])).values, # Clustering Title
             system_results_df['EventNumber'].apply(lambda x: np.array([int(i) for i in str(x).split(',')])).values, # Community Label
-            system_results_df['title'].apply(lambda x: np.array(str(x).split(','))).values  # Community Title
+            system_results_df['title'].apply(lambda x: np.array(str(x).split('|')) if pd.notna(x) and x else np.array([])).values  # Community Title
         ], dtype=object)
 
         # Call the new evaluation function
