@@ -391,9 +391,6 @@ def Entropy(Samples,Evals, Desires):#(Data, Data_W, Data_C):
     Classes = dict()  # a Dictionary collection that store all Desires with samples belonging to each
     Clusters = dict() # a Dictionary collection that store all Evals   with samples belonging to each
 
-    all_desires = {item for sublist in Desires for item in sublist}
-    num_classes = len(all_desires)
-
     Scores = list()
     for i in range(len(Samples)):
 
@@ -464,8 +461,6 @@ def Entropy(Samples,Evals, Desires):#(Data, Data_W, Data_C):
             
             Sum += Scores[Idx] # Score of Cluster 
 
-            if not SC[Idx]:
-                continue
             C = SC[Idx][0] # Select this Sample's Class
             
             S[C] += Scores[Idx] # Score of each class in this Cluster
@@ -473,7 +468,7 @@ def Entropy(Samples,Evals, Desires):#(Data, Data_W, Data_C):
 
         # Claculate the Total Entropy
         for s in S:
-            if S[s] != 0 and Sum > 0:
+            if S[s] != 0:
                 H += S[s] * log((S[s]/Sum),2)
             #else:
                 # H += 0
@@ -487,214 +482,99 @@ def Entropy(Samples,Evals, Desires):#(Data, Data_W, Data_C):
     #Compute Total Entropy
     HO = HO / N
 
-    # Normalize by log(N)
-    if num_classes > 1:
-        HO = HO / log(num_classes, 2)
-
     return HO
     
 
 
 
-def _jaccard_similarity(set1, set2):
-    """Calculates the Jaccard similarity between two sets."""
-    intersection = len(set1.intersection(set2))
-    union = len(set1.union(set2))
-    return intersection / union if union > 0 else 0.0
+def Matched_To_GS(GS,event_str):
+    words = event_str.split(' ')
+    #[1 for gs_string in GS for w in words if w in gs_string]
+    for gs_string in GS:
+        for w in words:
+            if w in gs_string:
+                return True
+    return False
 
-def TopicEvaluation(GS, SR):
-    """
-    Calculates Topic and Keyword metrics based on average Jaccard similarity.
-    """
-    # 1: Topic Evaluation
-    total_recall_score = 0
-    gs_topics_count = 0
-    for gs_topic_phrases in GS:
-        if not gs_topic_phrases: continue
-        gs_words = {word for phrase in gs_topic_phrases for word in phrase.split() if word}
-        if not gs_words: continue
+def Matched_To_GS_WordCount(GS,event_str):
+    WM=0
+    WT=0
+    words = event_str.split(' ')
+    for gs_string_ in GS:
+        gs_string = gs_string_[0]
+        for w in words:
+            if w in gs_string:
+                WM+=gs_string.count(w)
+                WT+=len(words)
+                break
+    return WM,WT
 
-        best_match_score = 0
-        for sr_topic_phrases in SR:
-            if not sr_topic_phrases: continue
-            sr_words = {word for phrase in sr_topic_phrases for word in phrase.split() if word}
-            if not sr_words: continue
+def IsCorrectDetect(SR,topic_str):
+    #topic_str ye topic hast ke dar GS vojood darad hala in tabe mikhad befahme le system ham an ra tashkhis dade ya na
+    words = topic_str[0].split(' ')
+    for event_i,event_list in enumerate(SR):
+        for event_str in event_list:
+            for w in words:
+                if w in event_str:
+                    return True
+    return False
 
-            similarity = _jaccard_similarity(gs_words, sr_words)
-            if similarity > best_match_score:
-                best_match_score = similarity
+def IsCorrectDetect_WordCount(SR,topic_str):
+    WM=0
+    WT=0
+    words = topic_str[0].split(' ')
+    for event_i,event_list in enumerate(SR):
+        event_str = ' '.join(event_list)
+        for w in words:
+            if w in event_str:
+                WM+=event_str.count(w)
+                WT+=len(words)
+                break
+    return WM,WT
 
-        total_recall_score += best_match_score
-        gs_topics_count += 1
 
-    TopicRecall = total_recall_score / gs_topics_count if gs_topics_count > 0 else 0
+def TopicEvaluation(GS,SR):
+    #1:Topic Evaluation
+    SRM = 0 # Tedad topic haye system ke ba GS match shode and - SystemResultMatch
+    for event_i,event_list in enumerate(SR):
+        for event_str in event_list:
+            if Matched_To_GS(GS,event_str):
+                SRM+=1
+                break
+    SRC = len(SR) # kolle tedad rooydad hayi ke system tashkhis dade - SystemRecultCount
+    TopicPrecision = SRM/SRC
 
-    total_precision_score = 0
-    sr_topics_count = 0
-    for sr_topic_phrases in SR:
-        if not sr_topic_phrases: continue
-        sr_words = {word for phrase in sr_topic_phrases for word in phrase.split() if word}
-        if not sr_words: continue
 
-        best_match_score = 0
-        for gs_topic_phrases in GS:
-            if not gs_topic_phrases: continue
-            gs_words = {word for phrase in gs_topic_phrases for word in phrase.split() if word}
-            if not gs_words: continue
+    GSM = 0 # Tedad topic hayi ke dar GS hastand va dorost tashkhis dade shode and - GoldenStandardMatch
+    for topic_str in GS:
+        if IsCorrectDetect(SR,topic_str):
+            GSM+=1
+    GSC = len(GS) # Kolle tedad topic haye mojood dar Estandard Talaei - GoldenStandardCount
+    TopicRecall = GSM/GSC
 
-            similarity = _jaccard_similarity(sr_words, gs_words)
-            if similarity > best_match_score:
-                best_match_score = similarity
+    TopicF1 = 2*(TopicPrecision*TopicRecall)/(TopicPrecision+TopicRecall)
 
-        total_precision_score += best_match_score
-        sr_topics_count += 1
 
-    TopicPrecision = total_precision_score / sr_topics_count if sr_topics_count > 0 else 0
+    #2: Keyword Evaluation
+    SRMW = 0  # Haman SRM vali tedad kalamate moshtarek dar event haye match shode ra neshan midahad na tedad khode event haye match shode
+    SRMWT = 0 # hame kalamate mojood dar event hayi ke system tashkhis dade va match shode
+    for event_i,event_list in enumerate(SR):
+        event_str = ' '.join(event_list)
+        WM,WT = Matched_To_GS_WordCount(GS,event_str)
+        SRMW+=WM
+        SRMWT+=WT
 
-    if (TopicPrecision + TopicRecall) == 0:
-        TopicF1 = 0.0
-    else:
-        TopicF1 = 2 * (TopicPrecision * TopicRecall) / (TopicPrecision + TopicRecall)
+    KeywordPrecision = SRMW/SRMWT
 
-    # 2: Keyword Evaluation (using the same set-based logic)
-    all_system_words = {word for topic in SR for phrase in topic for word in phrase.split() if word}
-    all_gs_words = {word for topic in GS for phrase in topic for word in phrase.split() if word}
+    GSMW = 0
+    GSMWT = 0
+    for topic_str in GS:
+        WM,WT = IsCorrectDetect_WordCount(SR,topic_str)
+        GSMW+=WM
+        GSMWT+=WT
 
-    if not all_system_words and not all_gs_words:
-        return TopicPrecision, TopicRecall, TopicF1, 0.0, 0.0, 0.0
+    KeywordRecall = GSMW/GSMWT
 
-    KeywordPrecision = _jaccard_similarity(all_system_words, all_gs_words)
-    KeywordRecall = _jaccard_similarity(all_gs_words, all_system_words) # Symmetric for Jaccard
+    KeywordF1 = 2*(KeywordPrecision*KeywordRecall)/(KeywordPrecision+KeywordRecall)
 
-    if (KeywordPrecision + KeywordRecall) == 0:
-        KeywordF1 = 0.0
-    else:
-        KeywordF1 = 2 * (KeywordPrecision * KeywordRecall) / (KeywordPrecision + KeywordRecall)
-    
-    return TopicPrecision, TopicRecall, TopicF1, KeywordPrecision, KeywordRecall, KeywordF1
-
-def MergeStrings(SR_Label, SR_Title):
-    #Detect The Maximum LabelNumber (Labels are started from 0 and end by MaxLabelNum)
-    MaxLabelNum = -1
-    for L in SR_Label:
-        if L and -1 not in L:  # Check if the list is not empty and does not contain -1
-            maxlabelnum = np.max(L)
-            if maxlabelnum > MaxLabelNum:
-                MaxLabelNum = maxlabelnum
-
-    #Detect All Title Strings for each Label
-    TitleOfLabels = np.array([set() for _ in range(int(MaxLabelNum) + 1)])
-    for i, l in enumerate(SR_Label):
-        for ii, ll in enumerate(l):
-            if ll != -1:
-                if ii < len(SR_Title[i]):
-                    for CurrentSTR in SR_Title[i][ii]:
-                        TitleOfLabels[ll].add(CurrentSTR)
-
-    #Hala khorooji merge shode ra amade mikonim
-    SR_Title_Merged = []
-    for L in SR_Label:
-        merged_labels = []
-        for labelnum_ in L:
-            labelnum = int(labelnum_)
-            if labelnum == -1:
-                merged_labels.append('-1')
-            else:
-                if labelnum < len(TitleOfLabels):
-                    merged_labels.append(','.join(TitleOfLabels[labelnum]))
-                else:
-                    merged_labels.append('') # Handle case where labelnum is out of bounds
-        SR_Title_Merged.append(merged_labels)
-
-    return np.array(SR_Title_Merged, dtype=object), [list(s) for s in TitleOfLabels]
-
-def TitleOfEachLabel_new(GS_Number,GS_String):
-    #Detect The Maximum LabelNumber in GS(Labels are started from 0(0 means out of class) and end by MaxLabelNum)
-    MaxLabelNum = -1
-    for L in GS_Number:
-        #Clean the string from brackets and quotes
-        L = str(L).replace('[','').replace(']','').replace("'",'')
-        try:
-            l = list(map(int, str(L).split(',')))
-            if l:
-                maxlabelnum = max(l)
-                if maxlabelnum>MaxLabelNum:
-                        MaxLabelNum = maxlabelnum
-        except ValueError:
-            continue # Skip if a label is not a valid integer
-
-    #Detect All Title Strings for each Label
-    TitleOfLabels = np.array([set() for _ in range(MaxLabelNum + 1)])
-    for i,l in enumerate(GS_Number):
-        l = str(l).replace('[','').replace(']','').replace("'",'')
-        gs_strings_for_sample = str(GS_String[i]).split(',')
-        try:
-            ll =  list(map(int, str(l).split(',')))
-            for iii,lll in enumerate(ll):
-                if lll != -1:
-                    if iii < len(gs_strings_for_sample):
-                        CurrentSTR = gs_strings_for_sample[iii]
-                        TitleOfLabels[lll].add(CurrentSTR)
-        except ValueError:
-            continue
-
-    return [list(s) for s in TitleOfLabels]
-
-def PrepareData_new(GoldenStandard,SystemResult):
-    GS = np.array([
-        GoldenStandard['Sequence']._values,
-        GoldenStandard['Topics(Id)']._values,
-        GoldenStandard['Topics(Str)']._values,
-        np.array([])
-    ], dtype=object)
-
-    SR = np.array([
-        SystemResult['Topics(Id)']._values,
-        SystemResult['Topics(Str)']._values,
-        np.array([])
-    ], dtype=object)
-
-    # Align SR with GS
-    SR_aligned = pd.merge(GoldenStandard[['Sequence']], SystemResult, on='Sequence', how='left')
-    SR[0] = SR_aligned['Topics(Id)'].fillna(-1)._values
-    SR[1] = SR_aligned['Topics(Str)'].fillna('')._values
-
-    # Process GS for Entropy (use only first label to reduce entropy)
-    gs_labels_for_entropy = []
-    for x in GoldenStandard['Topics(Id)']._values:
-        try:
-            first_id = str(x).split(',')[0]
-            gs_labels_for_entropy.append([int(float(first_id))])
-        except (ValueError, AttributeError):
-            gs_labels_for_entropy.append([-1])
-
-    # Process GS for Topic Matching (use all labels)
-    GS_Numbers_full = [str(x).split(',') for x in GoldenStandard['Topics(Id)']._values]
-    GS_Strings_full = [str(x).split(',') for x in GoldenStandard['Topics(Str)']._values]
-    GS[3] = TitleOfEachLabel_new(GS_Numbers_full, GS_Strings_full)
-
-    # Process SR
-    sr_labels_for_entropy = []
-    sr_labels_full = []
-    sr_titles_full = []
-    for x in SR[0]: # SR[0] is aligned Topic Ids
-        try:
-            # For entropy
-            first_id = str(x).replace('[','').replace(']','').replace("'",'').split(',')[0]
-            sr_labels_for_entropy.append([int(float(first_id))])
-            # For topic matching
-            clean_x = str(x).replace('[','').replace(']','').replace("'",'')
-            sr_labels_full.append([int(float(i)) for i in clean_x.split(',')])
-        except (ValueError, AttributeError):
-            sr_labels_for_entropy.append([-1])
-            sr_labels_full.append([-1])
-
-    for x in SR[1]: # SR[1] is aligned Topic Strings
-        sr_titles_full.append(str(x).split(','))
-
-    _, sr_topics_for_matching = MergeStrings(sr_labels_full, sr_titles_full)
-
-    # GS[1] for entropy, SR[0] for entropy
-    # GS[3] for topic matching, SR[1] for topic matching
-    return np.array([GS[0], gs_labels_for_entropy, GS[2], GS[3]], dtype=object), \
-           np.array([sr_labels_for_entropy, sr_topics_for_matching], dtype=object)
+    return TopicPrecision,TopicRecall,TopicF1, KeywordPrecision,KeywordRecall,KeywordF1
