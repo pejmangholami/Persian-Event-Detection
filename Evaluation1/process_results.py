@@ -42,8 +42,18 @@ def process_files():
 
     golden_standard_df = pd.read_excel(golden_standard_path, engine=get_engine(golden_standard_path))
 
+    # THE FINAL FIX for sequence_to_text
     all_data = np.load(all_data_path, allow_pickle=True)
-    sequence_to_text = {tuple(map(int, seq)): " ".join(map(str, text)) for seq, text in zip(all_data[0], all_data[1])}
+    sequences_from_npy = all_data[0]
+    texts_from_npy = all_data[1]
+    sequence_to_text = {}
+    for i in range(len(sequences_from_npy)):
+        # The sequence key is a tuple of integers.
+        key = tuple(sequences_from_npy[i])
+        # The text is a list of tokens that needs to be joined.
+        value = " ".join(map(str, texts_from_npy[i]))
+        sequence_to_text[key] = value
+
 
     files_by_params = defaultdict(dict)
     for filename in os.listdir(raw_results_path):
@@ -107,11 +117,10 @@ def process_files():
                     if full_text and window_num in topic_df["Window Number"].values:
                         topics_str = topic_df.loc[topic_df["Window Number"] == window_num, "Topic"].iloc[0]
 
-                        # THE FIX: Check if topics_str is a string before splitting
                         if isinstance(topics_str, str):
                             topics = [topic.strip() for topic in topics_str.split("|")]
                             for topic in topics:
-                                if re.search(r'\b' + re.escape(topic) + r'\b', full_text, re.IGNORECASE):
+                                if re.search(re.escape(topic), full_text, re.IGNORECASE):
                                     found_topic_strs.add(topic)
 
             if found_topic_ids:
