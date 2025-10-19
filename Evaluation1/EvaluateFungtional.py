@@ -372,7 +372,7 @@ def EvalAndSaveRes(GoldenStandard,SystemResult):
 
 
 
-def Entropy(Samples,Evals, Desires, scaling_factor=5.0):#(Data, Data_W, Data_C):
+def Entropy(Samples,Evals, Desires):#(Data, Data_W, Data_C):
     """ Calculate the Entropy
         It calculates Entropy based on the order of second and third parameters.
         if second parameter is Clusters and third parameter is classes  it caculate Cluster Entropy.
@@ -390,6 +390,9 @@ def Entropy(Samples,Evals, Desires, scaling_factor=5.0):#(Data, Data_W, Data_C):
     HO = 0 #Total Entropy
     Classes = dict()  # a Dictionary collection that store all Desires with samples belonging to each
     Clusters = dict() # a Dictionary collection that store all Evals   with samples belonging to each
+
+    all_desires = {item for sublist in Desires for item in sublist}
+    num_classes = len(all_desires)
 
     Scores = list()
     for i in range(len(Samples)):
@@ -484,8 +487,9 @@ def Entropy(Samples,Evals, Desires, scaling_factor=5.0):#(Data, Data_W, Data_C):
     #Compute Total Entropy
     HO = HO / N
 
-    # Apply scaling factor
-    HO = HO / scaling_factor
+    # Normalize by log(N)
+    if num_classes > 1:
+        HO = HO / log(num_classes, 2)
 
     return HO
     
