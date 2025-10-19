@@ -29,11 +29,16 @@ def process_files():
     """
     Processes the raw system results to generate consolidated Excel files.
     """
-    # Define paths
-    raw_results_path = "Evaluation1/RAWSystemResults"
-    golden_standard_path = "Evaluation1/GoldenStandard/GoldenStandard_TopicID_and_TopicString.xlsx"
-    all_data_path = "Language-Model_Scoring/AllData.npy"
-    output_path = "Evaluation1/ProcessedResults"
+    # Get the absolute path of the script's directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(script_dir)
+
+    # Define paths relative to the project root
+    raw_results_path = os.path.join(project_root, "Evaluation1/RAWSystemResults")
+    golden_standard_path = os.path.join(project_root, "Evaluation1/GoldenStandard/GoldenStandard_TopicID_and_TopicString.xlsx")
+    all_data_path = os.path.join(project_root, "Language-Model_Scoring/AllData.npy")
+    output_path = os.path.join(project_root, "Evaluation1/ProcessedResults")
+
 
     # Load golden standard
     golden_standard_df = pd.read_excel(golden_standard_path, engine=get_engine(golden_standard_path))
@@ -41,7 +46,7 @@ def process_files():
     # Load AllData.npy
     all_data = np.load(all_data_path, allow_pickle=True)
     sequence_to_text = {
-        tuple(seq): " ".join(token for token_list in text for token in token_list)
+        tuple(seq): " ".join(map(str, text))
         for seq, text in zip(all_data[0], all_data[1])
     }
 
@@ -80,7 +85,7 @@ def process_files():
                     # The 'Sequence' column in the Excel file seems to be just an integer, not a list
                     # We will assume it's a single integer and convert it to a tuple to match our keys
                     seq_tuple = (row["Sequence"],)
-                    sequence_to_event_window[seq_tuple] = {
+                    sequence_to_event_window[str(row["Sequence"])] = {
                         "EventNumber": row["EventNumber"],
                         "WindowNumber": window_num
                     }
@@ -93,24 +98,27 @@ def process_files():
         # Populate Topics(Id) and Topics(Str)
         for index, row in output_df.iterrows():
             sequence_str = row["Sequence"]
-            try:
-                # Convert the string representation of a list to a tuple of integers
-                sequence_tuple = tuple(map(int, re.findall(r'\d+', sequence_str)))
-            except (ValueError, TypeError):
-                continue
 
-            if sequence_tuple in sequence_to_event_window:
-                event_info = sequence_to_event_window[sequence_tuple]
+            if sequence_str in sequence_to_event_window:
+                event_info = sequence_to_event_window[sequence_str]
                 output_df.at[index, "Topics(Id)"] = event_info["EventNumber"]
 
                 window_num = event_info["WindowNumber"]
+
+                # The sequence in the golden standard is a string representation of a list.
+                # We need to convert it to a tuple of integers to match the keys in sequence_to_text.
+                try:
+                    sequence_tuple = tuple(map(int, re.findall(r'\d+', sequence_str)))
+                except (ValueError, TypeError):
+                    continue
+
                 text = sequence_to_text.get(sequence_tuple, "")
 
                 if text and window_num in topic_df["WindowNumber"].values:
                     topics_str = topic_df[topic_df["WindowNumber"] == window_num]["Topics"].iloc[0]
                     topics = [topic.strip() for topic in topics_str.split("|")]
 
-                    found_topics = [topic for topic in topics if topic in text]
+                    found_topics = [topic for topic in topics if re.search(r'\b' + re.escape(topic) + r'\b', text)]
 
                     if found_topics:
                         output_df.at[index, "Topics(Str)"] = ", ".join(found_topics)
