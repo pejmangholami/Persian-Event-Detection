@@ -501,6 +501,8 @@ def Matched_To_GS_WordCount(GS,event_str):
     WT=0
     words = event_str.split(' ')
     for gs_string_ in GS:
+        if not gs_string_:
+            continue
         gs_string = gs_string_[0]
         for w in words:
             if w in gs_string:
@@ -511,6 +513,8 @@ def Matched_To_GS_WordCount(GS,event_str):
 
 def IsCorrectDetect(SR,topic_str):
     #topic_str ye topic hast ke dar GS vojood darad hala in tabe mikhad befahme le system ham an ra tashkhis dade ya na
+    if not topic_str:
+        return False
     words = topic_str[0].split(' ')
     for event_i,event_list in enumerate(SR):
         for event_str in event_list:
@@ -522,6 +526,8 @@ def IsCorrectDetect(SR,topic_str):
 def IsCorrectDetect_WordCount(SR,topic_str):
     WM=0
     WT=0
+    if not topic_str:
+        return WM,WT
     words = topic_str[0].split(' ')
     for event_i,event_list in enumerate(SR):
         event_str = ' '.join(event_list)
@@ -542,7 +548,10 @@ def TopicEvaluation(GS,SR):
                 SRM+=1
                 break
     SRC = len(SR) # kolle tedad rooydad hayi ke system tashkhis dade - SystemRecultCount
-    TopicPrecision = SRM/SRC
+    if SRC == 0:
+        TopicPrecision = 0
+    else:
+        TopicPrecision = SRM/SRC
     
     
     GSM = 0 # Tedad topic hayi ke dar GS hastand va dorost tashkhis dade shode and - GoldenStandardMatch
@@ -550,9 +559,15 @@ def TopicEvaluation(GS,SR):
         if IsCorrectDetect(SR,topic_str):
             GSM+=1
     GSC = len(GS) # Kolle tedad topic haye mojood dar Estandard Talaei - GoldenStandardCount
-    TopicRecall = GSM/GSC
+    if GSC == 0:
+        TopicRecall = 0
+    else:
+        TopicRecall = GSM/GSC
     
-    TopicF1 = 2*(TopicPrecision*TopicRecall)/(TopicPrecision+TopicRecall)
+    if (TopicPrecision*TopicRecall) == 0:
+        TopicF1 = 0
+    else:
+        TopicF1 = 2*(TopicPrecision*TopicRecall)/(TopicPrecision+TopicRecall)
     
     
     #2: Keyword Evaluation
@@ -563,8 +578,11 @@ def TopicEvaluation(GS,SR):
         WM,WT = Matched_To_GS_WordCount(GS,event_str)
         SRMW+=WM
         SRMWT+=WT
-            
-    KeywordPrecision = SRMW/SRMWT
+
+    if SRMWT == 0:
+        KeywordPrecision = 0
+    else:
+        KeywordPrecision = SRMW/SRMWT
     
     GSMW = 0
     GSMWT = 0
@@ -573,8 +591,112 @@ def TopicEvaluation(GS,SR):
         GSMW+=WM
         GSMWT+=WT
     
-    KeywordRecall = GSMW/GSMWT
+    if GSMWT == 0:
+        KeywordRecall = 0
+    else:
+        KeywordRecall = GSMW/GSMWT
     
-    KeywordF1 = 2*(KeywordPrecision*KeywordRecall)/(KeywordPrecision+KeywordRecall)
+    if (KeywordPrecision*KeywordRecall) == 0:
+        KeywordF1 = 0
+    else:
+        KeywordF1 = 2*(KeywordPrecision*KeywordRecall)/(KeywordPrecision*KeywordRecall)
     
     return TopicPrecision,TopicRecall,TopicF1, KeywordPrecision,KeywordRecall,KeywordF1
+
+def MergeStrings(SR_Label, SR_Title):
+    #Detect The Maximum LabelNumber (Labels are started from 0 and end by MaxLabelNum)
+    MaxLabelNum = -1
+    for L in SR_Label:
+        if L:  # Check if the list is not empty
+            maxlabelnum = np.max(L)
+            if maxlabelnum > MaxLabelNum:
+                MaxLabelNum = maxlabelnum
+
+    #Detect All Title Strings for each Label
+    TitleOfLabels = np.array([set() for _ in range(int(MaxLabelNum) + 1)])
+    for i, l in enumerate(SR_Label):
+        for ii, ll in enumerate(l):
+            if ll != -1:
+                if ii < len(SR_Title[i]):
+                    for CurrentSTR in SR_Title[i][ii]:
+                        TitleOfLabels[ll].add(CurrentSTR)
+
+    #Hala khorooji merge shode ra amade mikonim
+    SR_Title_Merged = []
+    for L in SR_Label:
+        merged_labels = []
+        for labelnum_ in L:
+            labelnum = int(labelnum_)
+            if labelnum == -1:
+                merged_labels.append('-1')
+            else:
+                merged_labels.append(','.join(TitleOfLabels[labelnum]))
+        SR_Title_Merged.append(merged_labels)
+
+    return np.array(SR_Title_Merged, dtype=object), [list(s) for s in TitleOfLabels]
+
+def TitleOfEachLabel_new(GS_Number,GS_String):
+    #Detect The Maximum LabelNumber in GS(Labels are started from 0(0 means out of class) and end by MaxLabelNum)
+    MaxLabelNum = -1
+    for L in GS_Number:
+        #Clean the string from brackets and quotes
+        L = str(L).replace('[','').replace(']','').replace("'",'')
+        l = list(map(int, str(L).split(',')))
+        if l:
+            maxlabelnum = max(l)
+            if maxlabelnum>MaxLabelNum:
+                    MaxLabelNum = maxlabelnum
+
+    #Detect All Title Strings for each Label
+    TitleOfLabels = np.array([set() for _ in range(MaxLabelNum + 1)])
+    for i,l in enumerate(GS_Number):
+        l = str(l).replace('[','').replace(']','').replace("'",'')
+        ll =  list(map(int, str(l).split(',')))
+        for iii,lll in enumerate(ll):
+            if lll != -1:
+                CurrentSTR = (str(GS_String[i]).split(','))[iii]
+                TitleOfLabels[lll].add(CurrentSTR)
+
+    return [list(s) for s in TitleOfLabels]
+
+def PrepareData_new(GoldenStandard,SystemResult):
+    GS = np.array([
+        GoldenStandard['Sequence']._values,
+        GoldenStandard['Topics(Id)']._values,
+        GoldenStandard['Topics(Str)']._values,
+        np.array([])
+    ], dtype=object)
+
+    SR = np.array([
+        SystemResult['Topics(Id)']._values,
+        SystemResult['Topics(Str)']._values,
+        np.array([])
+    ], dtype=object)
+
+    # Align SR with GS
+    SR_aligned = pd.merge(GoldenStandard[['Sequence']], SystemResult, on='Sequence', how='left')
+    SR[0] = SR_aligned['Topics(Id)'].fillna(-1)._values
+    SR[1] = SR_aligned['Topics(Str)'].fillna('')._values
+
+    # Process GS
+    GS[1] = [str(x).split(',') for x in GS[1]]
+    GS[2] = [str(x).split(',') for x in GS[2]]
+    GS[3] = TitleOfEachLabel_new(GS[1],GS[2])
+
+    # Process SR
+    SR_labels = []
+    SR_titles = []
+    for x in SR[0]:
+        try:
+            #Clean the string from brackets and quotes
+            x = str(x).replace('[','').replace(']','').replace("'",'')
+            SR_labels.append([int(i) for i in str(x).split(',')])
+        except (ValueError, AttributeError):
+            SR_labels.append([-1])
+
+    for x in SR[1]:
+        SR_titles.append(str(x).split(','))
+
+    SR_titles_merged, SR_labels_titles = MergeStrings(SR_labels,SR_titles)
+
+    return GS, np.array([SR_labels, SR_labels_titles], dtype=object)
