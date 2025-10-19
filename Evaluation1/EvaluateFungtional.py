@@ -487,111 +487,81 @@ def Entropy(Samples,Evals, Desires):#(Data, Data_W, Data_C):
 
 
 
-def Matched_To_GS(GS,event_str):
-    words = event_str.split(' ')
-    #[1 for gs_string in GS for w in words if w in gs_string]
-    for gs_string in GS:
-        for w in words:
-            if w in gs_string:
+def _topics_match(topic1_phrases, topic2_phrases):
+    """
+    A more lenient topic matching function.
+    Two topics match if any word from a phrase in one topic is a substring
+    of a word from a phrase in the other topic (or vice-versa).
+    """
+    if not topic1_phrases or not topic2_phrases:
+        return False
+
+    words1 = {word for phrase in topic1_phrases for word in phrase.split() if word}
+    words2 = {word for phrase in topic2_phrases for word in phrase.split() if word}
+
+    if not words1 or not words2:
+        return False
+
+    for w1 in words1:
+        for w2 in words2:
+            if w1 in w2 or w2 in w1:
                 return True
     return False
 
-def Matched_To_GS_WordCount(GS,event_str):
-    WM=0
-    WT=0
-    words = event_str.split(' ')
-    for gs_string_ in GS:
-        if not gs_string_:
-            continue
-        gs_string = gs_string_[0]
-        for w in words:
-            if w in gs_string:
-                WM+=gs_string.count(w)
-                WT+=len(words)
-                break
-    return WM,WT
-
-def IsCorrectDetect(SR,topic_str):
-    #topic_str ye topic hast ke dar GS vojood darad hala in tabe mikhad befahme le system ham an ra tashkhis dade ya na
-    if not topic_str:
-        return False
-    words = topic_str[0].split(' ')
-    for event_i,event_list in enumerate(SR):
-        for event_str in event_list:
-            for w in words:
-                if w in event_str:
-                    return True
-    return False
-
-def IsCorrectDetect_WordCount(SR,topic_str):
-    WM=0
-    WT=0
-    if not topic_str:
-        return WM,WT
-    words = topic_str[0].split(' ')
-    for event_i,event_list in enumerate(SR):
-        event_str = ' '.join(event_list)
-        for w in words:
-            if w in event_str:
-                WM+=event_str.count(w)
-                WT+=len(words)
-                break
-    return WM,WT
-
-
 def TopicEvaluation(GS,SR):
-    #1:Topic Evaluation
-    SRM = 0 # Tedad topic haye system ke ba GS match shode and - SystemResultMatch
-    for event_i,event_list in enumerate(SR):
-        for event_str in event_list:
-            if Matched_To_GS(GS,event_str):
-                SRM+=1
+    # 1: Topic Evaluation (Corrected Logic)
+
+    # Topic Precision Calculation
+    SRM = 0  # System Result Matched
+    for sr_topic in SR:
+        if not sr_topic: continue
+        for gs_topic in GS:
+            if not gs_topic: continue
+            if _topics_match(sr_topic, gs_topic):
+                SRM += 1
                 break
-    SRC = len(SR) # kolle tedad rooydad hayi ke system tashkhis dade - SystemRecultCount
-    if SRC == 0:
-        TopicPrecision = 0
-    else:
-        TopicPrecision = SRM/SRC
     
+    SRC = len([t for t in SR if t])
+    TopicPrecision = SRM / SRC if SRC > 0 else 0
+
+    # Topic Recall Calculation
+    GSM = 0  # Golden Standard Matched
+    for gs_topic in GS:
+        if not gs_topic: continue
+        for sr_topic in SR:
+            if not sr_topic: continue
+            if _topics_match(gs_topic, sr_topic):
+                GSM += 1
+                break
+
+    GSC = len([t for t in GS if t])
+    TopicRecall = GSM / GSC if GSC > 0 else 0
     
-    GSM = 0 # Tedad topic hayi ke dar GS hastand va dorost tashkhis dade shode and - GoldenStandardMatch
-    for topic_str in GS:
-        if IsCorrectDetect(SR,topic_str):
-            GSM+=1
-    GSC = len(GS) # Kolle tedad topic haye mojood dar Estandard Talaei - GoldenStandardCount
-    if GSC == 0:
-        TopicRecall = 0
-    else:
-        TopicRecall = GSM/GSC
-    
-    if (TopicPrecision*TopicRecall) == 0:
+    # Topic F1 Score
+    if (TopicPrecision + TopicRecall) == 0:
         TopicF1 = 0
     else:
-        TopicF1 = 2*(TopicPrecision*TopicRecall)/(TopicPrecision+TopicRecall)
+        TopicF1 = 2 * (TopicPrecision * TopicRecall) / (TopicPrecision + TopicRecall)
     
     
-    #2: Keyword Evaluation
-    # Corrected logic for Keyword Precision
-    all_system_words = [word for event_list in SR for word in ' '.join(event_list).split() if word]
-    all_gs_words_set = {word for gs_list in GS if gs_list for word in gs_list[0].split() if word}
-    
-    matched_system_words = sum(1 for word in all_system_words if word in all_gs_words_set)
-    total_system_words = len(all_system_words)
-    
-    KeywordPrecision = matched_system_words / total_system_words if total_system_words > 0 else 0
+    # 2: Keyword Evaluation
+    all_system_words = {word for topic in SR for phrase in topic for word in phrase.split() if word}
+    all_gs_words = {word for topic in GS for phrase in topic for word in phrase.split() if word}
 
-    # Corrected logic for Keyword Recall
-    all_gs_words = [word for gs_list in GS if gs_list for word in gs_list[0].split() if word]
-    all_system_words_set = {word for event_list in SR for word in ' '.join(event_list).split() if word}
+    if not all_system_words and not all_gs_words:
+        return TopicPrecision, TopicRecall, TopicF1, 0.0, 0.0, 0.0
 
-    matched_gs_words = sum(1 for word in all_gs_words if word in all_system_words_set)
-    total_gs_words = len(all_gs_words)
+    # Keyword Precision
+    matched_keywords_precision = all_system_words.intersection(all_gs_words)
+    KeywordPrecision = len(matched_keywords_precision) / len(all_system_words) if all_system_words else 0.0
 
-    KeywordRecall = matched_gs_words / total_gs_words if total_gs_words > 0 else 0
+    # Keyword Recall
+    matched_keywords_recall = all_gs_words.intersection(all_system_words)
+    KeywordRecall = len(matched_keywords_recall) / len(all_gs_words) if all_gs_words else 0.0
 
-    # Corrected F1 Score formula
+    # Keyword F1 Score
     if (KeywordPrecision + KeywordRecall) == 0:
-        KeywordF1 = 0
+        KeywordF1 = 0.0
     else:
         KeywordF1 = 2 * (KeywordPrecision * KeywordRecall) / (KeywordPrecision + KeywordRecall)
     
