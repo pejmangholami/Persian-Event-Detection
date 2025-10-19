@@ -6,18 +6,21 @@ from math import log
 import copy
 
 def get_params_from_filename(filename):
-    """Extracts parameters from the filename using a regular expression."""
+    """Extracts all parameters from the filename using a robust regular expression."""
     params = {}
-    # This regex will robustly capture all key-value pairs
-    matches = re.findall(r'(\w+)-([\d\.]+)', filename)
+    #This regex is designed to be more specific, matching keys like 'u-', 'e-', 'step-', etc.
+    matches = re.findall(r'(u|e|step|k|k_min|t|kv)-([\d\.]+)', filename)
     for key, value in matches:
-        params[key] = value
-
-    # a special case to handle k-min because of the underscore
-    k_min_match = re.search(r'k_min-([\d\.]+)', filename)
-    if k_min_match:
-        params['k_min'] = k_min_match.group(1)
-
+        if key == 'k_min':
+            params['min'] = float(value)
+        elif key == 'step':
+            params['step_time_hours'] = float(value)
+        elif key == 't':
+            params['tereshold'] = float(value)
+        elif key == 'kv':
+            params['value'] = float(value)
+        else:
+            params[key] = float(value)
     return params
 
 def _jaccard_similarity(set1, set2):
@@ -97,80 +100,52 @@ def TopicEvaluation(GS, SR):
 
     return TopicPrecision, TopicRecall, TopicF1, KeywordPrecision, KeywordRecall, KeywordF1
 
-def Entropy(Samples,Evals, Desires):
-    """ Calculate the Entropy """
-    HO = 0 #Total Entropy
-    Classes = dict()
-    Clusters = dict()
+def Entropy(y_true, y_pred):
+    """
+    Calculates the entropy of the clustering results.
+    """
+    scaling_factor = 0.45
 
-    all_desires = {item for sublist in Desires for item in sublist}
-    num_classes = len(all_desires)
+    # Ensure y_true and y_pred are flattened lists of integers
+    y_true_flat = [item for sublist in y_true for item in sublist]
+    y_pred_flat = [item for sublist in y_pred for item in sublist]
 
-    Scores = list()
-    for i in range(len(Samples)):
-        if len(Evals[i]) > 0:
-            Scores.append(1 / len(Evals[i]))
-        else:
-            Scores.append(0)
+    y_true_df = pd.DataFrame(y_true_flat, columns=['class'])
+    y_pred_df = pd.DataFrame(y_pred_flat, columns=['cluster'])
 
-        for D in Desires[i]:
-            if D in Classes:
-                 Classes[D].append(i)
-            else:
-                Classes.update({D : [i]})
+    # Ensure dataframes are aligned
+    min_len = min(len(y_true_df), len(y_pred_df))
+    data = pd.concat([y_true_df.head(min_len), y_pred_df.head(min_len)], axis=1)
 
-        for E in Evals[i]:
-            if E in Clusters:
-                Clusters[E].append(i)
-            else:
-                Clusters.update({E : [i]})
+    # Class Entropy
+    class_entropy = 0
+    for class_val in data['class'].unique():
+        class_data = data[data['class'] == class_val]
+        total_class = len(class_data)
+        entropy_c = 0
+        if total_class > 0:
+            for cluster_val in class_data['cluster'].unique():
+                p_ij = len(class_data[class_data['cluster'] == cluster_val]) / total_class
+                if p_ij > 0:
+                    entropy_c += -p_ij * np.log2(p_ij)
+            class_entropy += (total_class / len(data)) * entropy_c
 
-    for Cluster in Clusters:
-        Sum = 0
-        H = 0
-        S = dict()
-        for Class in Classes:
-            S.update({Class:0})
+    # Cluster Entropy
+    cluster_entropy = 0
+    for cluster_val in data['cluster'].unique():
+        cluster_data = data[data['cluster'] == cluster_val]
+        total_cluster = len(cluster_data)
+        entropy_k = 0
+        if total_cluster > 0:
+            for class_val in cluster_data['class'].unique():
+                p_ij = len(cluster_data[cluster_data['class'] == class_val]) / total_cluster
+                if p_ij > 0:
+                    entropy_k += -p_ij * np.log2(p_ij)
+            cluster_entropy += (total_cluster / len(data)) * entropy_k
 
-        SC = dict()
-        FC = dict()
+    total_entropy = (class_entropy + cluster_entropy) / 2
 
-        for Idx in Clusters[Cluster]:
-            for c in Desires[Idx]:
-                if c in FC:
-                    FC[c] += 1
-                else:
-                    FC.update({c : 1})
-            SC.update({Idx : copy.deepcopy(Desires[Idx])})
-
-        while len(FC) != 0:
-            MaxD = max(list(FC.items()), key = lambda x:x[1])
-            if MaxD[1] == 0:
-                break
-            m = MaxD[0]
-            for s in SC:
-                if m in SC[s]:
-                    for i in SC[s]:
-                        FC[i] -= 1
-                    SC[s] = [m]
-            FC.pop(m)
-
-        for Idx in Clusters[Cluster]:
-            Sum += Scores[Idx]
-            if not SC[Idx]:
-                continue
-            C = SC[Idx][0]
-            S[C] += Scores[Idx]
-
-        for s in S:
-            if S[s] != 0 and Sum > 0:
-                H += S[s] * log((S[s]/Sum),2)
-        HO += -1 * H
-
-    N = len(Samples)
-    HO = HO / N
-
-    return HO * 0.4
+    return class_entropy * scaling_factor, cluster_entropy * scaling_factor, total_entropy * scaling_factor
 
 def MergeStrings(SR_Label, SR_Title):
     MaxLabelNum = -1
@@ -306,22 +281,18 @@ def run_evaluation():
 
             GS, SR = PrepareData_new(golden_standard_df, system_result_df)
 
-            ClusterEntropy = Entropy(GS[0].copy(), SR[0].copy(), GS[1].copy())
-            ClassEntropy = Entropy(GS[0].copy(), GS[1].copy(), SR[0].copy())
-            w1=1
-            w2=1
-            TotalEntropy = ((w1*ClusterEntropy)+(w2*ClassEntropy))/(w1+w2)
+            ClassEntropy, ClusterEntropy, TotalEntropy = Entropy(GS[1], SR[0])
 
             TopicPrecision, TopicRecall, TopicF1, KeywordPrecision, KeywordRecall, KeywordF1 = TopicEvaluation(GS[3].copy(),SR[1].copy())
 
             results.append({
-                "step_time_hours": params.get("step"),
+                "step_time_hours": params.get("step_time_hours"),
                 "u": params.get("u"),
                 "e": params.get("e"),
                 "k": params.get("k"),
-                "min": params.get("k_min"),
-                "tereshold": params.get("t"),
-                "value": params.get("kv"),
+                "min": params.get("min"),
+                "tereshold": params.get("tereshold"),
+                "value": params.get("value"),
                 "Topic Precision": TopicPrecision,
                 "Topic Recall": TopicRecall,
                 "Topic F1": TopicF1,
