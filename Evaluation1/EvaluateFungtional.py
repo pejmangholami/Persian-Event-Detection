@@ -571,35 +571,29 @@ def TopicEvaluation(GS,SR):
     
     
     #2: Keyword Evaluation
-    SRMW = 0  # Haman SRM vali tedad kalamate moshtarek dar event haye match shode ra neshan midahad na tedad khode event haye match shode
-    SRMWT = 0 # hame kalamate mojood dar event hayi ke system tashkhis dade va match shode
-    for event_i,event_list in enumerate(SR):
-        event_str = ' '.join(event_list)
-        WM,WT = Matched_To_GS_WordCount(GS,event_str)
-        SRMW+=WM
-        SRMWT+=WT
+    # Corrected logic for Keyword Precision
+    all_system_words = [word for event_list in SR for word in ' '.join(event_list).split() if word]
+    all_gs_words_set = {word for gs_list in GS if gs_list for word in gs_list[0].split() if word}
+    
+    matched_system_words = sum(1 for word in all_system_words if word in all_gs_words_set)
+    total_system_words = len(all_system_words)
+    
+    KeywordPrecision = matched_system_words / total_system_words if total_system_words > 0 else 0
 
-    if SRMWT == 0:
-        KeywordPrecision = 0
-    else:
-        KeywordPrecision = SRMW/SRMWT
-    
-    GSMW = 0
-    GSMWT = 0
-    for topic_str in GS:
-        WM,WT = IsCorrectDetect_WordCount(SR,topic_str)
-        GSMW+=WM
-        GSMWT+=WT
-    
-    if GSMWT == 0:
-        KeywordRecall = 0
-    else:
-        KeywordRecall = GSMW/GSMWT
-    
-    if (KeywordPrecision*KeywordRecall) == 0:
+    # Corrected logic for Keyword Recall
+    all_gs_words = [word for gs_list in GS if gs_list for word in gs_list[0].split() if word]
+    all_system_words_set = {word for event_list in SR for word in ' '.join(event_list).split() if word}
+
+    matched_gs_words = sum(1 for word in all_gs_words if word in all_system_words_set)
+    total_gs_words = len(all_gs_words)
+
+    KeywordRecall = matched_gs_words / total_gs_words if total_gs_words > 0 else 0
+
+    # Corrected F1 Score formula
+    if (KeywordPrecision + KeywordRecall) == 0:
         KeywordF1 = 0
     else:
-        KeywordF1 = 2*(KeywordPrecision*KeywordRecall)/(KeywordPrecision*KeywordRecall)
+        KeywordF1 = 2 * (KeywordPrecision * KeywordRecall) / (KeywordPrecision + KeywordRecall)
     
     return TopicPrecision,TopicRecall,TopicF1, KeywordPrecision,KeywordRecall,KeywordF1
 
