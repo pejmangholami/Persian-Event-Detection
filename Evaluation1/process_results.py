@@ -43,7 +43,6 @@ def process_files():
     golden_standard_df = pd.read_excel(golden_standard_path, engine=get_engine(golden_standard_path))
 
     all_data = np.load(all_data_path, allow_pickle=True)
-    # Correctly create the sequence-to-text map. Key is a tuple of ints.
     sequence_to_text = {tuple(map(int, seq)): " ".join(map(str, text)) for seq, text in zip(all_data[0], all_data[1])}
 
     files_by_params = defaultdict(dict)
@@ -68,7 +67,6 @@ def process_files():
         compaire_df_sheets = pd.read_excel(files["compaire"], sheet_name=None, engine=compaire_engine)
         topic_df = pd.read_excel(files["topic"], engine=topic_engine)
 
-        # Create a map from individual event sequences to their details.
         event_map = {}
         for sheet_name, sheet_df in compaire_df_sheets.items():
             match = re.search(r'Window-(\d+)', sheet_name)
@@ -82,17 +80,14 @@ def process_files():
                     }
 
         output_df = golden_standard_df.copy()
-        # Ensure columns exist and are of object type to allow string storage
         output_df["Topics(Id)"] = ""
         output_df["Topics(Str)"] = ""
         output_df = output_df.astype({"Topics(Id)": object, "Topics(Str)": object})
 
-
         for index, row in output_df.iterrows():
-            gs_sequence_str = row["Sequence"]
+            gs_sequence_str = str(row["Sequence"])
 
             try:
-                # Parse the golden standard sequence string like '[101, 204]' into a tuple of ints
                 individual_events = tuple(map(int, re.findall(r'\d+', gs_sequence_str)))
             except (ValueError, TypeError):
                 continue
@@ -101,11 +96,7 @@ def process_files():
             found_topic_strs = set()
 
             full_text = sequence_to_text.get(individual_events, "")
-            if not full_text:
-                 # If text not found for the whole sequence, skip topic string search
-                 pass
 
-            # Iterate through each individual event from the golden standard sequence
             for event in individual_events:
                 if event in event_map:
                     event_info = event_map[event]
@@ -113,18 +104,18 @@ def process_files():
 
                     window_num = event_info["WindowNumber"]
 
-                    # Find topics for this window
-                    if full_text and window_num in topic_df["WindowNumber"].values:
-                        topics_str = topic_df.loc[topic_df["WindowNumber"] == window_num, "Topics"].iloc[0]
-                        topics = [topic.strip() for topic in topics_str.split("|")]
+                    if full_text and window_num in topic_df["Window Number"].values:
+                        topics_str = topic_df.loc[topic_df["Window Number"] == window_num, "Topic"].iloc[0]
 
-                        for topic in topics:
-                            # Use word boundary regex for safer search
-                            if re.search(r'\b' + re.escape(topic) + r'\b', full_text, re.IGNORECASE):
-                                found_topic_strs.add(topic)
+                        # THE FIX: Check if topics_str is a string before splitting
+                        if isinstance(topics_str, str):
+                            topics = [topic.strip() for topic in topics_str.split("|")]
+                            for topic in topics:
+                                if re.search(r'\b' + re.escape(topic) + r'\b', full_text, re.IGNORECASE):
+                                    found_topic_strs.add(topic)
 
             if found_topic_ids:
-                output_df.at[index, "Topics(Id)"] = ", ".join(sorted(found_topic_ids))
+                output_df.at[index, "Topics(Id)"] = ", ".join(sorted(list(set(found_topic_ids))))
             if found_topic_strs:
                 output_df.at[index, "Topics(Str)"] = ", ".join(sorted(list(found_topic_strs)))
 
