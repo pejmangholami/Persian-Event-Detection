@@ -27,6 +27,11 @@ def run_evaluation():
 
     golden_standard_df = pd.read_excel(golden_standard_path)
 
+    # Filter out "OutOfClass" samples (Topic ID 0) before evaluation
+    golden_standard_df['Topics(Id)'] = golden_standard_df['Topics(Id)'].astype(str)
+    golden_standard_df = golden_standard_df[golden_standard_df['Topics(Id)'] != '0'].copy()
+
+
     results = []
 
     for filename in os.listdir(processed_results_path):
