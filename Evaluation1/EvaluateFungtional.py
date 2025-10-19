@@ -395,10 +395,7 @@ def Entropy(Samples,Evals, Desires, scaling_factor=5.0):#(Data, Data_W, Data_C):
     for i in range(len(Samples)):
 
         #Calculate Score of each Point
-        if len(Evals[i]) == 0:
-            Scores.append(0)
-        else:
-            Scores.append(1 / len(Evals[i]))
+        Scores.append(1 / len(Evals[i]))
 
         # Initiate Classes & Clusters
         # region Classes
@@ -464,7 +461,7 @@ def Entropy(Samples,Evals, Desires, scaling_factor=5.0):#(Data, Data_W, Data_C):
             
             Sum += Scores[Idx] # Score of Cluster 
 
-            if not SC[Idx]: # Check if the list is empty
+            if not SC[Idx]:
                 continue
             C = SC[Idx][0] # Select this Sample's Class
             
@@ -473,7 +470,7 @@ def Entropy(Samples,Evals, Desires, scaling_factor=5.0):#(Data, Data_W, Data_C):
 
         # Claculate the Total Entropy
         for s in S:
-            if S[s] != 0 and Sum != 0:
+            if S[s] != 0 and Sum > 0:
                 H += S[s] * log((S[s]/Sum),2)
             #else:
                 # H += 0
@@ -495,79 +492,82 @@ def Entropy(Samples,Evals, Desires, scaling_factor=5.0):#(Data, Data_W, Data_C):
 
 
 
-def _topics_match(topic1_phrases, topic2_phrases):
+def _jaccard_similarity(set1, set2):
+    """Calculates the Jaccard similarity between two sets."""
+    intersection = len(set1.intersection(set2))
+    union = len(set1.union(set2))
+    return intersection / union if union > 0 else 0.0
+
+def TopicEvaluation(GS, SR):
     """
-    Topics match if they share at least one common word.
+    Calculates Topic and Keyword metrics based on average Jaccard similarity.
     """
-    if not topic1_phrases or not topic2_phrases:
-        return False
+    # 1: Topic Evaluation
+    total_recall_score = 0
+    gs_topics_count = 0
+    for gs_topic_phrases in GS:
+        if not gs_topic_phrases: continue
+        gs_words = {word for phrase in gs_topic_phrases for word in phrase.split() if word}
+        if not gs_words: continue
 
-    words1 = {word for phrase in topic1_phrases for word in phrase.split() if word}
-    words2 = {word for phrase in topic2_phrases for word in phrase.split() if word}
+        best_match_score = 0
+        for sr_topic_phrases in SR:
+            if not sr_topic_phrases: continue
+            sr_words = {word for phrase in sr_topic_phrases for word in phrase.split() if word}
+            if not sr_words: continue
 
-    if not words1 or not words2:
-        return False
+            similarity = _jaccard_similarity(gs_words, sr_words)
+            if similarity > best_match_score:
+                best_match_score = similarity
 
-    return not words1.isdisjoint(words2)
+        total_recall_score += best_match_score
+        gs_topics_count += 1
 
-def TopicEvaluation(GS,SR):
-    # 1: Topic Evaluation (Corrected Logic)
+    TopicRecall = total_recall_score / gs_topics_count if gs_topics_count > 0 else 0
 
-    # Topic Precision Calculation
-    SRM = 0  # System Result Matched
-    for sr_topic in SR:
-        if not sr_topic: continue
-        for gs_topic in GS:
-            if not gs_topic: continue
-            if _topics_match(sr_topic, gs_topic):
-                SRM += 1
-                break
+    total_precision_score = 0
+    sr_topics_count = 0
+    for sr_topic_phrases in SR:
+        if not sr_topic_phrases: continue
+        sr_words = {word for phrase in sr_topic_phrases for word in phrase.split() if word}
+        if not sr_words: continue
 
-    SRC = len([t for t in SR if t])
-    TopicPrecision = SRM / SRC if SRC > 0 else 0
+        best_match_score = 0
+        for gs_topic_phrases in GS:
+            if not gs_topic_phrases: continue
+            gs_words = {word for phrase in gs_topic_phrases for word in phrase.split() if word}
+            if not gs_words: continue
 
-    # Topic Recall Calculation
-    GSM = 0  # Golden Standard Matched
-    for gs_topic in GS:
-        if not gs_topic: continue
-        for sr_topic in SR:
-            if not sr_topic: continue
-            if _topics_match(gs_topic, sr_topic):
-                GSM += 1
-                break
+            similarity = _jaccard_similarity(sr_words, gs_words)
+            if similarity > best_match_score:
+                best_match_score = similarity
 
-    GSC = len([t for t in GS if t])
-    TopicRecall = GSM / GSC if GSC > 0 else 0
+        total_precision_score += best_match_score
+        sr_topics_count += 1
 
-    # Topic F1 Score
+    TopicPrecision = total_precision_score / sr_topics_count if sr_topics_count > 0 else 0
+
     if (TopicPrecision + TopicRecall) == 0:
-        TopicF1 = 0
+        TopicF1 = 0.0
     else:
         TopicF1 = 2 * (TopicPrecision * TopicRecall) / (TopicPrecision + TopicRecall)
 
-
-    # 2: Keyword Evaluation
+    # 2: Keyword Evaluation (using the same set-based logic)
     all_system_words = {word for topic in SR for phrase in topic for word in phrase.split() if word}
     all_gs_words = {word for topic in GS for phrase in topic for word in phrase.split() if word}
 
     if not all_system_words and not all_gs_words:
         return TopicPrecision, TopicRecall, TopicF1, 0.0, 0.0, 0.0
 
-    # Keyword Precision
-    matched_keywords_precision = all_system_words.intersection(all_gs_words)
-    KeywordPrecision = len(matched_keywords_precision) / len(all_system_words) if all_system_words else 0.0
+    KeywordPrecision = _jaccard_similarity(all_system_words, all_gs_words)
+    KeywordRecall = _jaccard_similarity(all_gs_words, all_system_words) # Symmetric for Jaccard
 
-    # Keyword Recall
-    matched_keywords_recall = all_gs_words.intersection(all_system_words)
-    KeywordRecall = len(matched_keywords_recall) / len(all_gs_words) if all_gs_words else 0.0
-
-    # Keyword F1 Score
     if (KeywordPrecision + KeywordRecall) == 0:
         KeywordF1 = 0.0
     else:
         KeywordF1 = 2 * (KeywordPrecision * KeywordRecall) / (KeywordPrecision + KeywordRecall)
     
-    return TopicPrecision,TopicRecall,TopicF1, KeywordPrecision,KeywordRecall,KeywordF1
+    return TopicPrecision, TopicRecall, TopicF1, KeywordPrecision, KeywordRecall, KeywordF1
 
 def MergeStrings(SR_Label, SR_Title):
     #Detect The Maximum LabelNumber (Labels are started from 0 and end by MaxLabelNum)
