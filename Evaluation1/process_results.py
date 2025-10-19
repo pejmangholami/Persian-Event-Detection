@@ -29,28 +29,23 @@ def process_files():
     """
     Processes the raw system results to generate consolidated Excel files.
     """
-    # Get the absolute path of the script's directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(script_dir)
 
-    # Define paths relative to the project root
     raw_results_path = os.path.join(project_root, "Evaluation1/RAWSystemResults")
     golden_standard_path = os.path.join(project_root, "Evaluation1/GoldenStandard/GoldenStandard_TopicID_and_TopicString.xlsx")
     all_data_path = os.path.join(project_root, "Language-Model_Scoring/AllData.npy")
     output_path = os.path.join(project_root, "Evaluation1/ProcessedResults")
 
+    if not os.path.exists(output_path):
+        os.makedirs(output_path)
 
-    # Load golden standard
     golden_standard_df = pd.read_excel(golden_standard_path, engine=get_engine(golden_standard_path))
 
-    # Load AllData.npy
     all_data = np.load(all_data_path, allow_pickle=True)
-    sequence_to_text = {
-        tuple(seq): " ".join(map(str, text))
-        for seq, text in zip(all_data[0], all_data[1])
-    }
+    # Correctly create the sequence-to-text map. Key is a tuple of ints.
+    sequence_to_text = {tuple(map(int, seq)): " ".join(map(str, text)) for seq, text in zip(all_data[0], all_data[1])}
 
-    # Group files by parameters
     files_by_params = defaultdict(dict)
     for filename in os.listdir(raw_results_path):
         params = get_params_from_filename(filename)
@@ -62,68 +57,77 @@ def process_files():
             elif "Topic_Systemresult" in filename:
                 files_by_params[param_key]["topic"] = filepath
 
-    # Process each parameter set
     for param_key, files in files_by_params.items():
         if "compaire" not in files or "topic" not in files:
             continue
 
         print(f"Processing files for parameters: {dict(param_key)}")
 
-        # Load results files
         compaire_engine = get_engine(files["compaire"])
         topic_engine = get_engine(files["topic"])
         compaire_df_sheets = pd.read_excel(files["compaire"], sheet_name=None, engine=compaire_engine)
         topic_df = pd.read_excel(files["topic"], engine=topic_engine)
 
-        # Create a mapping from sequence to EventNumber and WindowNumber
-        sequence_to_event_window = {}
+        # Create a map from individual event sequences to their details.
+        event_map = {}
         for sheet_name, sheet_df in compaire_df_sheets.items():
             match = re.search(r'Window-(\d+)', sheet_name)
             if match:
                 window_num = int(match.group(1))
                 for _, row in sheet_df.iterrows():
-                    # The 'Sequence' column in the Excel file seems to be just an integer, not a list
-                    # We will assume it's a single integer and convert it to a tuple to match our keys
-                    seq_tuple = (row["Sequence"],)
-                    sequence_to_event_window[str(row["Sequence"])] = {
+                    event_seq = int(row["Sequence"])
+                    event_map[event_seq] = {
                         "EventNumber": row["EventNumber"],
                         "WindowNumber": window_num
                     }
 
-        # Initialize output dataframe
         output_df = golden_standard_df.copy()
+        # Ensure columns exist and are of object type to allow string storage
         output_df["Topics(Id)"] = ""
         output_df["Topics(Str)"] = ""
+        output_df = output_df.astype({"Topics(Id)": object, "Topics(Str)": object})
 
-        # Populate Topics(Id) and Topics(Str)
+
         for index, row in output_df.iterrows():
-            sequence_str = row["Sequence"]
+            gs_sequence_str = row["Sequence"]
 
-            if sequence_str in sequence_to_event_window:
-                event_info = sequence_to_event_window[sequence_str]
-                output_df.at[index, "Topics(Id)"] = event_info["EventNumber"]
+            try:
+                # Parse the golden standard sequence string like '[101, 204]' into a tuple of ints
+                individual_events = tuple(map(int, re.findall(r'\d+', gs_sequence_str)))
+            except (ValueError, TypeError):
+                continue
 
-                window_num = event_info["WindowNumber"]
+            found_topic_ids = []
+            found_topic_strs = set()
 
-                # The sequence in the golden standard is a string representation of a list.
-                # We need to convert it to a tuple of integers to match the keys in sequence_to_text.
-                try:
-                    sequence_tuple = tuple(map(int, re.findall(r'\d+', sequence_str)))
-                except (ValueError, TypeError):
-                    continue
+            full_text = sequence_to_text.get(individual_events, "")
+            if not full_text:
+                 # If text not found for the whole sequence, skip topic string search
+                 pass
 
-                text = sequence_to_text.get(sequence_tuple, "")
+            # Iterate through each individual event from the golden standard sequence
+            for event in individual_events:
+                if event in event_map:
+                    event_info = event_map[event]
+                    found_topic_ids.append(str(event_info["EventNumber"]))
 
-                if text and window_num in topic_df["WindowNumber"].values:
-                    topics_str = topic_df[topic_df["WindowNumber"] == window_num]["Topics"].iloc[0]
-                    topics = [topic.strip() for topic in topics_str.split("|")]
+                    window_num = event_info["WindowNumber"]
 
-                    found_topics = [topic for topic in topics if re.search(r'\b' + re.escape(topic) + r'\b', text)]
+                    # Find topics for this window
+                    if full_text and window_num in topic_df["WindowNumber"].values:
+                        topics_str = topic_df.loc[topic_df["WindowNumber"] == window_num, "Topics"].iloc[0]
+                        topics = [topic.strip() for topic in topics_str.split("|")]
 
-                    if found_topics:
-                        output_df.at[index, "Topics(Str)"] = ", ".join(found_topics)
+                        for topic in topics:
+                            # Use word boundary regex for safer search
+                            if re.search(r'\b' + re.escape(topic) + r'\b', full_text, re.IGNORECASE):
+                                found_topic_strs.add(topic)
 
-        # Save the output file
+            if found_topic_ids:
+                output_df.at[index, "Topics(Id)"] = ", ".join(sorted(found_topic_ids))
+            if found_topic_strs:
+                output_df.at[index, "Topics(Str)"] = ", ".join(sorted(list(found_topic_strs)))
+
         params = dict(param_key)
         output_filename = f"Processed_u-{params['u']}_e-{params['e']}_step-{params['step_time_hours']}_k-{params['k']}_k_min-{params['k_min']}_t-{params['tereshold']}_kv-{params['k_value']}.xlsx"
         output_filepath = os.path.join(output_path, output_filename)
