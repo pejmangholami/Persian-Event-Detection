@@ -42,18 +42,16 @@ def process_files():
 
     golden_standard_df = pd.read_excel(golden_standard_path, engine=get_engine(golden_standard_path))
 
-    # THE FINAL, CORRECTED FIX for sequence_to_text
+    # THE FINAL, CORRECTED FIX for text extraction, based on user clarification
     all_data = np.load(all_data_path, allow_pickle=True)
-    sequences_from_npy = all_data[0]
-    texts_from_npy = all_data[1]
-    sequence_to_text = {}
-    for i in range(len(sequences_from_npy)):
-        # The key must be a tuple to be hashable for the dictionary.
-        key = tuple(sequences_from_npy[i])
-        # The text is a list of lists of tokens, so it needs to be flattened.
-        flat_list = [item for sublist in texts_from_npy[i] for item in sublist]
-        value = " ".join(map(str, flat_list))
-        sequence_to_text[key] = value
+    event_to_text = {}
+    # all_data[0] contains the sequences/events
+    # all_data[1] contains the texts
+    for i in range(len(all_data[0])):
+        for j in range(len(all_data[0][i])):
+            event_id = all_data[0][i][j]
+            text_tokens = all_data[1][i][j]
+            event_to_text[event_id] = " ".join(map(str, text_tokens))
 
 
     files_by_params = defaultdict(dict)
@@ -99,7 +97,6 @@ def process_files():
             gs_sequence_str = str(row["Sequence"])
 
             try:
-                # This key must also be a tuple to match the dictionary keys.
                 individual_events = tuple(map(int, re.findall(r'\d+', gs_sequence_str)))
             except (ValueError, TypeError):
                 continue
@@ -107,7 +104,9 @@ def process_files():
             found_topic_ids = []
             found_topic_strs = set()
 
-            full_text = sequence_to_text.get(individual_events, "")
+            # Assemble the full text by concatenating texts of individual events
+            full_text_parts = [event_to_text.get(event, "") for event in individual_events]
+            full_text = " ".join(full_text_parts)
 
             for event in individual_events:
                 if event in event_map:
