@@ -42,11 +42,8 @@ def process_files():
 
     golden_standard_df = pd.read_excel(golden_standard_path, engine=get_engine(golden_standard_path))
 
-    # THE FINAL, CORRECTED FIX for text extraction, based on user clarification
     all_data = np.load(all_data_path, allow_pickle=True)
     event_to_text = {}
-    # all_data[0] contains the sequences/events
-    # all_data[1] contains the texts
     for i in range(len(all_data[0])):
         for j in range(len(all_data[0][i])):
             event_id = all_data[0][i][j]
@@ -104,9 +101,11 @@ def process_files():
             found_topic_ids = []
             found_topic_strs = set()
 
-            # Assemble the full text by concatenating texts of individual events
             full_text_parts = [event_to_text.get(event, "") for event in individual_events]
             full_text = " ".join(full_text_parts)
+            full_text_lower = full_text.lower()
+            full_text_word_set = set(full_text_lower.split())
+
 
             for event in individual_events:
                 if event in event_map:
@@ -115,14 +114,24 @@ def process_files():
 
                     window_num = event_info["WindowNumber"]
 
-                    if full_text and window_num in topic_df["Window Number"].values:
-                        topics_str = topic_df.loc[topic_df["Window Number"] == window_num, "Topic"].iloc[0]
+                    matching_rows = topic_df[topic_df["Window Number"] == window_num]
+                    if not matching_rows.empty:
+                        all_topics = []
+                        for _, topic_row in matching_rows.iterrows():
+                            topics_str = topic_row["Topic"]
+                            if isinstance(topics_str, str):
+                                all_topics.extend([topic.strip() for topic in topics_str.split("|")])
 
-                        if isinstance(topics_str, str):
-                            topics = [topic.strip() for topic in topics_str.split("|")]
-                            for topic in topics:
-                                if re.search(re.escape(topic), full_text, re.IGNORECASE):
-                                    found_topic_strs.add(topic)
+                        for topic in all_topics:
+                            topic_lower = topic.lower()
+                            topic_words = topic_lower.split()
+
+                            # Combined logic: (All words are present) OR (The full phrase is a substring)
+                            all_words_present = all(word in full_text_word_set for word in topic_words)
+                            phrase_is_substring = topic_lower in full_text_lower
+
+                            if all_words_present or phrase_is_substring:
+                                found_topic_strs.add(topic)
 
             if found_topic_ids:
                 output_df.at[index, "Topics(Id)"] = ", ".join(sorted(list(set(found_topic_ids))))
