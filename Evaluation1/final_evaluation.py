@@ -4,6 +4,7 @@ import os
 import re
 from math import log
 import copy
+import ast
 
 def get_params_from_filename(filename):
     """Extracts all parameters from the filename using a robust regular expression."""
@@ -288,6 +289,34 @@ def run_evaluation():
 
             TopicPrecision, TopicRecall, TopicF1, KeywordPrecision, KeywordRecall, KeywordF1 = TopicEvaluation(GS[3].copy(),SR[1].copy())
 
+            # New aggregation logic
+            unique_events_for_run = set()
+            all_scores_for_run = []
+
+            # Safely parse the string representations of lists
+            for _, row in system_result_df.iterrows():
+                # Parse event tuples
+                if pd.notna(row.get("SystemEventTuples")) and row["SystemEventTuples"]:
+                    try:
+                        # Convert string '[ (1,2), (3,4) ]' to list of tuples
+                        tuples_list = ast.literal_eval(row["SystemEventTuples"])
+                        unique_events_for_run.update(tuples_list)
+                    except (SyntaxError, NameError, ValueError):
+                        pass # Ignore parsing errors for malformed strings
+
+                # Parse newsworthiness scores
+                if pd.notna(row.get("NewsworthinessScores")) and row["NewsworthinessScores"]:
+                    try:
+                        # Convert string '[0.1, 0.2]' to list of floats
+                        scores_list = ast.literal_eval(row["NewsworthinessScores"])
+                        all_scores_for_run.extend(scores_list)
+                    except (SyntaxError, NameError, ValueError):
+                        pass # Ignore parsing errors
+
+            number_of_events = len(unique_events_for_run)
+            mean_newsworthiness = np.mean(all_scores_for_run) if all_scores_for_run else 0.0
+
+
             results.append({
                 "step_time_hours": params.get("step_time_hours"),
                 "u": params.get("u"),
@@ -304,7 +333,9 @@ def run_evaluation():
                 "Keyword F1": KeywordF1,
                 "Class Entropy": ClassEntropy,
                 "Cluster Entropy": ClusterEntropy,
-                "Total Entropy": TotalEntropy
+                "Total Entropy": TotalEntropy,
+                "Mean_Newsworthiness": mean_newsworthiness,
+                "NumberOfEvents": number_of_events,
             })
 
     final_df = pd.DataFrame(results)
