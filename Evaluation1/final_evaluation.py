@@ -59,11 +59,26 @@ def calculate_number_of_events(params, raw_results_path):
     try:
         # Construct the filename for the raw topic results file.
         # It includes all parameters, including threshold and k_value.
+        tereshold_val = params['tereshold']
+        tereshold_str = f"{tereshold_val:.1f}" if isinstance(tereshold_val, float) and not tereshold_val.is_integer() else f"{int(tereshold_val)}"
+
         topic_filename = (
             f"Topic_Systemresult_u-{int(params['u'])}_e-{int(params['e'])}_step_time_hours-{int(params['step_time_hours'])}"
-            f"_k-{int(params['k'])}_k_min-{int(params['min'])}_tereshold-{params['tereshold']:.1f}_k_value-{int(params['value'])}.xls"
+            f"_k-{int(params['k'])}_k_min-{int(params['min'])}_tereshold-{params['tereshold']}_k_value-{int(params['value'])}.xls"
         )
-        filepath = os.path.join(raw_results_path, topic_filename)
+
+        # Attempt to find the file with either .0 or integer for tereshold
+        filepath_float = os.path.join(raw_results_path, topic_filename.replace(f"tereshold-{params['tereshold']}", f"tereshold-{params['tereshold']:.1f}"))
+        filepath_int = os.path.join(raw_results_path, topic_filename.replace(f"tereshold-{params['tereshold']}", f"tereshold-{int(params['tereshold'])}"))
+
+        if os.path.exists(filepath_float):
+            filepath = filepath_float
+        elif os.path.exists(filepath_int):
+            filepath = filepath_int
+        else:
+            # If neither file exists, try a generic path and then handle not found
+            filepath = os.path.join(raw_results_path, topic_filename)
+
 
         if os.path.exists(filepath):
             # Determine the correct engine for the Excel file

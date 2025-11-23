@@ -8,7 +8,7 @@ def get_params_from_filename(filename):
     """Extracts parameters from the filename."""
     param_pattern = re.compile(
         r"u-(?P<u>\d+)_e-(?P<e>\d+)_step_time_hours-(?P<step_time_hours>\d+)_"
-        r"k-(?P<k>\d+)_k_min-(?P<k_min>\d+)_tereshold-(?P<tereshold>\d+\.\d+)_"
+        r"k-(?P<k>\d+)_k_min-(?P<k_min>\d+)_tereshold-(?P<tereshold>[\d\.]+)_"
         r"k_value-(?P<k_value>\d+)"
     )
     match = param_pattern.search(filename)
