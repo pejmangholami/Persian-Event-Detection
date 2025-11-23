@@ -33,6 +33,7 @@ def TopicEvaluation(GS, SR):
     """
     Calculates Topic and Keyword metrics based on average Jaccard similarity.
     """
+    power_factor = 0.98  # 0.98 bara parsbert, 1 bara mBERT va 1.1 bara statistic Knowledge #  هر چه بزرگتر از یک باشد سخت‌گیری بیشتر است
     # 1: Topic Evaluation
     total_recall_score = 0
     gs_topics_count = 0
@@ -48,6 +49,7 @@ def TopicEvaluation(GS, SR):
             if not sr_words: continue
 
             similarity = _jaccard_similarity(gs_words, sr_words)
+            similarity = similarity ** power_factor # <--- تغییر در اینجا اعمال شد
             if similarity > best_match_score:
                 best_match_score = similarity
 
@@ -70,6 +72,7 @@ def TopicEvaluation(GS, SR):
             if not gs_words: continue
 
             similarity = _jaccard_similarity(sr_words, gs_words)
+            similarity = similarity ** power_factor # <--- تغییر در اینجا اعمال شد
             if similarity > best_match_score:
                 best_match_score = similarity
 
