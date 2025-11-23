@@ -39,7 +39,8 @@ def calculate_mean_newsworthiness(params, miue_files_path):
         if os.path.exists(filepath):
             miu_e_values = np.load(filepath, allow_pickle=True)
             # Flatten the list of lists and calculate the mean, ignoring empty sublists
-            all_values = [item for sublist in miu_e_values if sublist for item in sublist]
+            # Use len(sublist) > 0 to handle both empty lists and empty numpy arrays safely
+            all_values = [item for sublist in miu_e_values if len(sublist) > 0 for item in sublist]
             if all_values:
                 return np.mean(all_values)
             else:
