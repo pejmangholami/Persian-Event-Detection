@@ -23,6 +23,91 @@ def get_params_from_filename(filename):
             params[key] = float(value)
     return params
 
+def calculate_mean_newsworthiness(params, miue_files_path):
+    """
+    Calculates the mean newsworthiness from the corresponding MiuE file.
+    """
+    try:
+        # Construct the filename from parameters. Note the mapping from 'min' to 'k_min'.
+        # The MiuE filename does not contain threshold or k_value, so we build it with the params that it does contain.
+        miue_filename = (
+            f"MiuE_u-{int(params['u'])}_e-{int(params['e'])}_step_time_hours-{int(params['step_time_hours'])}"
+            f"_k-{int(params['k'])}_k_min-{int(params['min'])}.npy"
+        )
+        filepath = os.path.join(miue_files_path, miue_filename)
+
+        if os.path.exists(filepath):
+            miu_e_values = np.load(filepath, allow_pickle=True)
+            # Flatten the list of lists and calculate the mean, ignoring empty sublists
+            # Use len(sublist) > 0 to handle both empty lists and empty numpy arrays safely
+            all_values = [item for sublist in miu_e_values if len(sublist) > 0 for item in sublist]
+            if all_values:
+                return np.mean(all_values)
+            else:
+                return 0.0
+        else:
+            # If the specific file is not found, return NaN
+            return np.nan
+    except (KeyError, TypeError):
+        # If params are missing, we cannot construct a filename.
+        return np.nan
+
+
+def calculate_number_of_events(params, raw_results_path):
+    """
+    Calculates the total number of unique events from the Topic_Systemresult file.
+    """
+    try:
+        # Construct the filename for the raw topic results file.
+        # It includes all parameters, including threshold and k_value.
+        tereshold_val = params['tereshold']
+        tereshold_str = f"{tereshold_val:.1f}" if isinstance(tereshold_val, float) and not tereshold_val.is_integer() else f"{int(tereshold_val)}"
+
+        topic_filename = (
+            f"Topic_Systemresult_u-{int(params['u'])}_e-{int(params['e'])}_step_time_hours-{int(params['step_time_hours'])}"
+            f"_k-{int(params['k'])}_k_min-{int(params['min'])}_tereshold-{params['tereshold']}_k_value-{int(params['value'])}.xls"
+        )
+
+        # Attempt to find the file with either .0 or integer for tereshold
+        filepath_float = os.path.join(raw_results_path, topic_filename.replace(f"tereshold-{params['tereshold']}", f"tereshold-{params['tereshold']:.1f}"))
+        filepath_int = os.path.join(raw_results_path, topic_filename.replace(f"tereshold-{params['tereshold']}", f"tereshold-{int(params['tereshold'])}"))
+
+        if os.path.exists(filepath_float):
+            filepath = filepath_float
+        elif os.path.exists(filepath_int):
+            filepath = filepath_int
+        else:
+            # If neither file exists, try a generic path and then handle not found
+            filepath = os.path.join(raw_results_path, topic_filename)
+
+
+        if os.path.exists(filepath):
+            # Determine the correct engine for the Excel file
+            engine = 'xlrd' if filepath.endswith('.xls') else 'openpyxl'
+            df = pd.read_excel(filepath, engine=engine)
+
+            # Check if the 'Topic' column exists
+            if 'Topic' not in df.columns:
+                return 0
+
+            # Process the 'Topic' column to count unique events
+            all_topics = set()
+            # Drop rows where 'Topic' is NaN or empty
+            df.dropna(subset=['Topic'], inplace=True)
+            for topics in df['Topic']:
+                # Ensure topics are treated as strings
+                if isinstance(topics, str) and topics.strip():
+                    # Split by '|' and add non-empty topics to the set
+                    for topic in topics.split('|'):
+                        if topic.strip():
+                            all_topics.add(topic.strip())
+            return len(all_topics)
+        else:
+            return np.nan
+    except (KeyError, TypeError, FileNotFoundError):
+        # Handle cases where params are missing or file is not found
+        return np.nan
+
 def _jaccard_similarity(set1, set2):
     """Calculates the Jaccard similarity between two sets."""
     intersection = len(set1.intersection(set2))
@@ -265,7 +350,9 @@ def PrepareData_new(GoldenStandard,SystemResult):
 def run_evaluation():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     processed_results_path = os.path.join(script_dir, "ProcessedResults")
+    raw_results_path = os.path.join(script_dir, "RAWSystemResults") # Path to raw results
     golden_standard_path = os.path.join(script_dir, "GoldenStandard/GoldenStandard_TopicID_and_TopicString.xlsx")
+    miue_files_path = os.path.join(script_dir, "MiuE_files") # Path to MiuE files
     output_filepath = os.path.join(script_dir, "Final_Evaluation_Report.xlsx")
 
     golden_standard_df = pd.read_excel(golden_standard_path)
@@ -288,6 +375,11 @@ def run_evaluation():
 
             TopicPrecision, TopicRecall, TopicF1, KeywordPrecision, KeywordRecall, KeywordF1 = TopicEvaluation(GS[3].copy(),SR[1].copy())
 
+            mean_newsworthiness = calculate_mean_newsworthiness(params, miue_files_path)
+
+            number_of_events = calculate_number_of_events(params, raw_results_path)
+
+
             results.append({
                 "step_time_hours": params.get("step_time_hours"),
                 "u": params.get("u"),
@@ -304,7 +396,9 @@ def run_evaluation():
                 "Keyword F1": KeywordF1,
                 "Class Entropy": ClassEntropy,
                 "Cluster Entropy": ClusterEntropy,
-                "Total Entropy": TotalEntropy
+                "Total Entropy": TotalEntropy,
+                "Mean_Newsworthiness": mean_newsworthiness,
+                "NumberOfEvents": number_of_events,
             })
 
     final_df = pd.DataFrame(results)
