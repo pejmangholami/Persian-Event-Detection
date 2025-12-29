@@ -136,10 +136,43 @@ def generate_data_for_model(model_name, random_seed=42):
 
 if __name__ == "__main__":
     models_to_generate = ["mBERT", "ParsBERT", "Statistical"]
+    output_dir = "Language-Model_Scoring_Parallel_Fast"
+    os.makedirs(output_dir, exist_ok=True)
 
     for model in models_to_generate:
         generated_data = generate_data_for_model(model)
         if generated_data:
             df = pd.DataFrame(generated_data)
-            df.to_csv(f"Language-Model_Scoring_Parallel_Fast/{model}_results.csv", index=False, encoding='utf-8-sig')
+            df.to_csv(f"{output_dir}/{model}_results.csv", index=False, encoding='utf-8-sig')
             print(f"Successfully saved results for {model}.\n")
+
+    # After generating all model files, calculate and save the correlations.
+    correlation_results = []
+    print("Calculating correlations between Topic Recall and Total Entropy...")
+
+    for model in models_to_generate:
+        try:
+            filepath = f"{output_dir}/{model}_results.csv"
+            df_model = pd.read_csv(filepath)
+
+            # Ensure columns are numeric for correlation calculation
+            df_model['Topic Recall'] = pd.to_numeric(df_model['Topic Recall'])
+            df_model['Total Entropy'] = pd.to_numeric(df_model['Total Entropy'])
+
+            correlation = df_model['Topic Recall'].corr(df_model['Total Entropy'], method='pearson')
+            correlation_results.append({
+                'Model': model,
+                'Pearson_Correlation': f"{correlation:.4f}"
+            })
+            print(f"- {model}: {correlation:.4f}")
+
+        except FileNotFoundError:
+            print(f"Warning: Could not find file {filepath} to calculate correlation.")
+        except Exception as e:
+            print(f"An error occurred while processing {model}: {e}")
+
+    if correlation_results:
+        df_corr = pd.DataFrame(correlation_results)
+        corr_filepath = f"{output_dir}/EntropyRecall_correlation.csv"
+        df_corr.to_csv(corr_filepath, index=False, encoding='utf-8-sig')
+        print(f"\nSuccessfully saved correlation results to {corr_filepath}")
