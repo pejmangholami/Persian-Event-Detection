@@ -44,34 +44,36 @@ def calculate_distance(current, optimal):
     )
 
 def calculate_topic_recall(u, e, k, kmin, threshold, value, model, seed):
-    """Calculates the synthetic Topic Recall value."""
+    """Calculates the synthetic Topic Recall value with a gentler curve."""
     opt = OPTIMAL_POINTS[model]['recall']
 
     distance = calculate_distance({'u': u, 'e': e, 'k': k, 'kmin': kmin, 'threshold': threshold, 'value': value}, opt)
 
-    distance_effect = math.exp(-pow(distance, 1.5) / 35)
+    # Softened exponential decay to create a wider, more gradual peak.
+    distance_effect = math.exp(-pow(distance, 1.2) / 50)
 
+    # Small, reproducible fluctuations for a more natural appearance.
+    u_fluctuation = math.sin(u * 1.5 + seed * 0.2) * 0.015
+    e_fluctuation = math.cos(e * 0.8 + seed * 0.3) * 0.01
+
+    # Dampened parameter effects for a gentler curve.
     u_diff = u - opt['u']
-    u_effect = 1.0 - pow(abs(u_diff), 1.3) * 0.018 - pow(u_diff, 2) * 0.001
-
+    u_effect = 1.0 - pow(abs(u_diff), 1.3) * 0.015 - pow(u_diff, 2) * 0.0008 + u_fluctuation
     e_diff = e - opt['e']
-    e_effect = 1.0 - abs(e_diff) * 0.012 - pow(e_diff, 2) * 0.0008
-
+    e_effect = 1.0 - abs(e_diff) * 0.010 - pow(e_diff, 2) * 0.0006 + e_fluctuation
     k_ratio = abs(k - opt['k']) / 10
     kmin_ratio = abs(kmin - opt['kmin']) / 5
-    k_effect = 1.0 - (k_ratio + kmin_ratio) * 0.025
+    k_effect = 1.0 - (k_ratio + kmin_ratio) * 0.020
+    threshold_effect = 1.0 - abs(threshold - opt['threshold']) * 0.007
+    value_effect = 1.0 - abs(value - opt['value']) * 0.005
 
-    threshold_effect = 1.0 - abs(threshold - opt['threshold']) * 0.008
-    value_effect = 1.0 - abs(value - opt['value']) * 0.006
-
-    correlation_factors = {'mBERT': 0.045, 'ParsBERT': 0.035, 'Statistical': 0.055}
-
-    independent_noise = (seeded_random(seed * 31) - 0.5) * correlation_factors[model] + \
-                        (seeded_random(seed * 41) - 0.5) * correlation_factors[model] * 0.6
+    correlation_factors = {'mBERT': 0.02, 'ParsBERT': 0.015, 'Statistical': 0.03}
+    independent_noise = (seeded_random(seed * 31) - 0.5) * correlation_factors[model]
 
     result = opt['target'] * distance_effect * u_effect * e_effect * k_effect * threshold_effect * value_effect + independent_noise
 
-    return min(0.95, max(0.60, result))
+    # Lowered the minimum value to 0.30 to permanently fix the "flatness" issue.
+    return min(0.95, max(0.30, result))
 
 def calculate_class_entropy(u, e, k, kmin, threshold, value, model, seed):
     """Calculates the synthetic Class Entropy value."""
@@ -126,11 +128,11 @@ def calculate_cluster_entropy(u, e, k, kmin, threshold, value, class_entropy, mo
 
     return min(1.8, max(0.20, result))
 
-def calculate_total_entropy(class_entropy, cluster_entropy, u, k):
+def calculate_total_entropy(class_entropy, cluster_entropy, u, k, model):
     """Calculates the total entropy as a weighted average of class and cluster entropy."""
-    class_weight = 0.48 + (u - 5) * 0.015
+    opt = OPTIMAL_POINTS[model]['entropy']
+    class_weight = 0.48 + (u - opt['u']) * 0.015
     cluster_weight = 1 - class_weight
-
     total = class_weight * class_entropy + cluster_weight * cluster_entropy
 
     return min(2.0, max(0.30, total))
@@ -209,8 +211,8 @@ def generate_data_for_model(model_name, random_seed=42):
 
                     for threshold in threshold_values:
                         for value in value_values:
-                            # This complex condition block replicates the `isValid` logic from the original JS code
-                            # to generate a curated, sparse set of parameter combinations.
+                            # This filter combines the original sparse data selection with a guarantee that the
+                            # user's specified optimal points are always included in the output.
                             is_optimal_point = False
                             for metric_type in ['recall', 'entropy']:
                                 for model_name_opt, opt_points in OPTIMAL_POINTS.items():
@@ -222,7 +224,7 @@ def generate_data_for_model(model_name, random_seed=42):
                                 if is_optimal_point:
                                     break
 
-                            is_valid = is_optimal_point or (
+                            is_valid_sparse = (
                                 (u == 1 and e == 10 and k in [10, 15, 20] and kmin in [4, 6] and threshold in [5, 10, 15] and value in [5, 10]) or
                                 (u == 1 and e == 20 and k in [10, 15, 20] and kmin in [4, 6] and threshold in [5, 10, 15] and value in [5, 10]) or
                                 (u in [1, 2] and e in [2, 3, 5] and k == 10 and kmin == 8 and threshold == 6 and value == 3) or
@@ -243,7 +245,7 @@ def generate_data_for_model(model_name, random_seed=42):
                                 (u in [2, 4, 6, 8] and e in [10, 20] and k == 10 and kmin == 8 and threshold == 6 and value == 3)
                             )
 
-                            if not is_valid:
+                            if not (is_optimal_point or is_valid_sparse):
                                 continue
 
                             seed = random_seed + config_index * 17
@@ -251,25 +253,15 @@ def generate_data_for_model(model_name, random_seed=42):
                             topic_recall = calculate_topic_recall(u, e, k, kmin, threshold, value, model_name, seed)
                             class_entropy = calculate_class_entropy(u, e, k, kmin, threshold, value, model_name, seed)
                             cluster_entropy = calculate_cluster_entropy(u, e, k, kmin, threshold, value, class_entropy, model_name, seed)
-                            total_entropy = calculate_total_entropy(class_entropy, cluster_entropy, u, k)
+                            total_entropy = calculate_total_entropy(class_entropy, cluster_entropy, u, k, model_name)
 
                             # --- Final Overrides for Optimal Points ---
-                            # This block manually sets the target values for the user's specified optimal points.
-                            if model_name == 'mBERT' and u == 6 and e == 5 and k == 6 and kmin == 5 and threshold == 6 and value == 4:
-                                topic_recall = 0.87
-                            if model_name == 'ParsBERT' and u == 6 and e == 10 and k == 10 and kmin == 8 and threshold == 7 and value == 3:
-                                topic_recall = 0.88
-                            if model_name == 'Statistical' and u == 5 and e == 10 and k == 15 and kmin == 6 and threshold == 6 and value == 5:
-                                topic_recall = 0.72
-                            if model_name == 'mBERT' and u == 7 and e == 3 and k == 10 and kmin == 6 and threshold == 7 and value == 5:
-                                total_entropy = 1.05
-                            if model_name == 'ParsBERT' and u == 6 and e == 5 and k == 10 and kmin == 8 and threshold == 7 and value == 4:
-                                total_entropy = 0.96
-                            if model_name == 'Statistical' and u == 5 and e == 5 and k == 15 and kmin == 8 and threshold == 10 and value == 5:
-                                total_entropy = 1.28
-
-                            # Add a small amount of noise to prevent 'nan' correlations
-                            total_entropy += (seeded_random(seed * 71) - 0.5) * 0.01
+                            if model_name == 'mBERT' and u == 6 and e == 5 and k == 6 and kmin == 5 and threshold == 6 and value == 4: topic_recall = 0.87
+                            if model_name == 'ParsBERT' and u == 6 and e == 10 and k == 10 and kmin == 8 and threshold == 7 and value == 3: topic_recall = 0.88
+                            if model_name == 'Statistical' and u == 5 and e == 10 and k == 15 and kmin == 6 and threshold == 6 and value == 5: topic_recall = 0.72
+                            if model_name == 'mBERT' and u == 7 and e == 3 and k == 10 and kmin == 6 and threshold == 7 and value == 5: total_entropy = 1.05
+                            if model_name == 'ParsBERT' and u == 6 and e == 5 and k == 10 and kmin == 8 and threshold == 7 and value == 4: total_entropy = 0.96
+                            if model_name == 'Statistical' and u == 5 and e == 5 and k == 15 and kmin == 8 and threshold == 10 and value == 5: total_entropy = 1.28
 
                             newsworthiness = calculate_newsworthiness(topic_recall, total_entropy, u, e, k, model_name, seed)
                             num_events = calculate_number_of_events(u, e, k, threshold, value, model_name, seed)
@@ -324,8 +316,10 @@ if __name__ == "__main__":
     print("Calculating correlations between Topic Recall and Total Entropy...")
     correlation_results = []
     for model_name, df in all_dataframes.items():
+        # Add a tiny amount of noise to total_entropy to prevent 'nan' correlation
+        df['Total Entropy'] = pd.to_numeric(df['Total Entropy']) + (df.index.to_series().apply(lambda x: (seeded_random(x) - 0.5) * 0.0001))
         df['Topic Recall'] = pd.to_numeric(df['Topic Recall'])
-        df['Total Entropy'] = pd.to_numeric(df['Total Entropy'])
+
         correlation = df['Topic Recall'].corr(df['Total Entropy'], method='pearson')
         correlation_results.append({
             'Model': model_name,
