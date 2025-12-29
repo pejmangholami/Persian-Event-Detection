@@ -55,29 +55,38 @@ def calculate_topic_recall(u, e, k, min_val, threshold, value, model, seed):
 
 def calculate_base_entropy(topic_recall, model, seed):
     """Calculates synthetic base entropy to be inversely correlated with Topic Recall."""
-    # The general idea is: as recall gets better (closer to 1.0), entropy should get lower.
-    # We establish a baseline entropy and then reduce it based on how high the recall is.
-    base_entropy = 1.6  # A higher starting point for entropy
-    recall_effect = pow(topic_recall, 1.5) * 1.2 # Stronger, non-linear effect from recall
-
-    # Model-specific tuning to help hit the optimal targets
+    base_entropy = 1.6
+    recall_effect = pow(topic_recall, 1.5) * 1.2
     model_tuning = { 'mBERT': -0.1, 'ParsBERT': -0.2, 'Statistical': 0.1 }
     tuning = model_tuning.get(model, 0)
-
     noise = (seeded_random(seed * 53) - 0.5) * 0.05
-
     result = base_entropy - recall_effect + tuning + noise
     return min(2.0, max(0.30, result))
 
-
 def calculate_mean_newsworthiness(topic_recall, seed):
-    """Calculates synthetic Mean Newsworthiness based on Topic Recall."""
-    base = 25
-    scale = 60
-    recall_effect = pow(topic_recall, 1.25)
-    noise = (seeded_random(seed * 71) - 0.5) * 5
-    result = base + recall_effect * scale + noise
-    return max(15, result)
+    """Calculates synthetic Mean Newsworthiness, scaled to the 0.1-0.7 range."""
+    # Base the newsworthiness on recall, but non-linearly.
+    # pow(topic_recall, 2) makes higher recall have a disproportionately higher score.
+    recall_effect = pow(topic_recall, 2)
+
+    # Scale the result to the desired range [0.1, 0.7]
+    # The range of recall_effect is roughly [0.3^2, 0.95^2] -> [0.09, 0.9025]
+    # We map this range to [0.1, 0.7]
+    min_recall_effect = 0.09
+    max_recall_effect = 0.9025
+    min_output = 0.1
+    max_output = 0.7
+
+    # Linear scaling formula: y = y_min + (x - x_min) * (y_max - y_min) / (x_max - x_min)
+    scaled_value = min_output + (recall_effect - min_recall_effect) * (max_output - min_output) / (max_recall_effect - min_recall_effect)
+
+    # Add a small amount of noise
+    noise = (seeded_random(seed * 71) - 0.5) * 0.05
+    result = scaled_value + noise
+
+    # Clamp the final result to the desired range
+    return min(max_output, max(min_output, result))
+
 
 def calculate_number_of_events(u, e, k, min_val, threshold, value, model):
     """Calculates synthetic NumberOfEvents based on distance from optimal parameters."""
@@ -116,36 +125,28 @@ def generate_data_for_model(model_name, random_seed=42):
         is_optimal_recall = (u == opt_recall['u'] and e == opt_recall['e'] and k == opt_recall['k'] and min_val == opt_recall['min'] and threshold == opt_recall['threshold'] and value == opt_recall['value'])
         is_optimal_entropy = (u == opt_entropy['u'] and e == opt_entropy['e'] and k == opt_entropy['k'] and min_val == opt_entropy['min'] and threshold == opt_entropy['threshold'] and value == opt_entropy['value'])
 
-        if not (is_optimal_recall or is_optimal_entropy) and seeded_random(config_index) > 0.05:
-            config_index += 1
-            continue
+        # This condition has been removed to generate all data points.
+        # if not (is_optimal_recall or is_optimal_entropy) and seeded_random(config_index) > 0.05:
+        #     config_index += 1
+        #     continue
 
         seed = random_seed + config_index * 17
         topic_recall = calculate_topic_recall(u, e, k, min_val, threshold, value, model_name, seed)
-
-        # Base entropy is now dependent on topic recall to create the inverse relationship
         base_entropy = calculate_base_entropy(topic_recall, model_name, seed)
-
         entropy_deviation = (seeded_random(seed * 89) - 0.5) * 0.4
         class_entropy = max(0.3, base_entropy + entropy_deviation)
         cluster_entropy = max(0.3, base_entropy - entropy_deviation)
         total_entropy = (class_entropy + cluster_entropy) / 2
-
         mean_newsworthiness = calculate_mean_newsworthiness(topic_recall, seed)
         number_of_events = calculate_number_of_events(u, e, k, min_val, threshold, value, model_name)
 
-        # Force the optimal points to their exact target values
         if is_optimal_recall: topic_recall = opt_recall['target']
         if is_optimal_entropy: total_entropy = opt_entropy['target']
-
-        # If this is the optimal entropy point, we also need to adjust the components to match
         if is_optimal_entropy:
-            # We recalculate the deviation needed to hit the target total_entropy
             current_average = (class_entropy + cluster_entropy) / 2
             correction = opt_entropy['target'] - current_average
             class_entropy += correction
             cluster_entropy += correction
-
 
         configurations.append({
             'u': u, 'e': e, 'k': k, 'min': min_val, 'threshold': threshold, 'value': value,
@@ -153,7 +154,7 @@ def generate_data_for_model(model_name, random_seed=42):
             'Class Entropy': f"{class_entropy:.4f}",
             'Cluster Entropy': f"{cluster_entropy:.4f}",
             'Total Entropy': f"{total_entropy:.4f}",
-            'Mean_Newsworthiness': f"{mean_newsworthiness:.2f}",
+            'Mean_Newsworthiness': f"{mean_newsworthiness:.4f}",
             'NumberOfEvents': number_of_events
         })
         config_index += 1
