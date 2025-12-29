@@ -44,34 +44,50 @@ def calculate_distance(current, optimal):
 def calculate_topic_recall(u, e, k, min_val, threshold, value, model, seed):
     """Calculates the synthetic Topic Recall value."""
     opt = OPTIMAL_POINTS[model]['recall']
-    distance = calculate_distance({'u': u, 'e': e, 'k': k, 'min': min_val, 'threshold': threshold, 'value': value}, opt)
-
+    current_params = {'u': u, 'e': e, 'k': k, 'min': min_val, 'threshold': threshold, 'value': value}
+    distance = calculate_distance(current_params, opt)
     distance_effect = math.exp(-pow(distance, 1.3) / 45)
-
     u_fluctuation = math.sin(u * 1.5 + seed * 0.2) * 0.015
     u_effect = 1.0 - pow(abs(u - opt['u']), 1.3) * 0.015 - pow(u - opt['u'], 2) * 0.0008 + u_fluctuation
-
     noise = (seeded_random(seed * 31) - 0.5) * 0.02
-
     result = opt['target'] * distance_effect * u_effect + noise
     return min(0.95, max(0.30, result))
 
-def calculate_entropy(u, e, k, min_val, threshold, value, model, seed):
-    """Calculates the synthetic Total Entropy value."""
-    opt = OPTIMAL_POINTS[model]['entropy']
-    distance = calculate_distance({'u': u, 'e': e, 'k': k, 'min': min_val, 'threshold': threshold, 'value': value}, opt)
+def calculate_base_entropy(topic_recall, model, seed):
+    """Calculates synthetic base entropy to be inversely correlated with Topic Recall."""
+    # The general idea is: as recall gets better (closer to 1.0), entropy should get lower.
+    # We establish a baseline entropy and then reduce it based on how high the recall is.
+    base_entropy = 1.6  # A higher starting point for entropy
+    recall_effect = pow(topic_recall, 1.5) * 1.2 # Stronger, non-linear effect from recall
 
-    base_entropy = opt['target']
-    distance_effect = math.exp(-pow(distance, 1.5) / 60)
+    # Model-specific tuning to help hit the optimal targets
+    model_tuning = { 'mBERT': -0.1, 'ParsBERT': -0.2, 'Statistical': 0.1 }
+    tuning = model_tuning.get(model, 0)
 
-    u_effect = 1.0 + abs(u - opt['u']) * 0.015
-    k_effect = 1.0 + abs(k - opt['k']) * 0.008
-    min_effect = 1.0 + abs(min_val - opt['min']) * 0.01
+    noise = (seeded_random(seed * 53) - 0.5) * 0.05
 
-    noise = (seeded_random(seed * 53) - 0.5) * 0.03
-
-    result = base_entropy * distance_effect * u_effect * k_effect * min_effect + noise
+    result = base_entropy - recall_effect + tuning + noise
     return min(2.0, max(0.30, result))
+
+
+def calculate_mean_newsworthiness(topic_recall, seed):
+    """Calculates synthetic Mean Newsworthiness based on Topic Recall."""
+    base = 25
+    scale = 60
+    recall_effect = pow(topic_recall, 1.25)
+    noise = (seeded_random(seed * 71) - 0.5) * 5
+    result = base + recall_effect * scale + noise
+    return max(15, result)
+
+def calculate_number_of_events(u, e, k, min_val, threshold, value, model):
+    """Calculates synthetic NumberOfEvents based on distance from optimal parameters."""
+    opt = OPTIMAL_POINTS[model]['recall']
+    distance = calculate_distance({'u': u, 'e': e, 'k': k, 'min': min_val, 'threshold': threshold, 'value': value}, opt)
+    max_events = 1500
+    min_events = 200
+    decay_effect = math.exp(-pow(distance, 1.2) / 50)
+    result = min_events + (max_events - min_events) * decay_effect
+    return int(result)
 
 # ==============================================================================
 # DATA GENERATION
@@ -81,49 +97,64 @@ def generate_data_for_model(model_name, random_seed=42):
     """Generates the full dataset for a single model."""
     print(f"Generating data for model: {model_name}...")
     configurations = []
-
     u_values = [1, 2, 3, 4, 5] if model_name == 'Statistical' else list(range(1, 10))
     e_values = [2, 3, 5, 10, 20]
     k_values = [3, 4, 5, 6, 10, 15, 20]
     min_values = [1, 2, 3, 4, 5, 6, 8]
     threshold_values = [3, 4, 5, 6, 7, 10, 15]
     value_values = [1, 2, 3, 4, 5, 10]
-
     param_combinations = list(itertools.product(u_values, e_values, k_values, min_values, threshold_values, value_values))
     config_index = 0
 
     for params in param_combinations:
         u, e, k, min_val, threshold, value = params
-
         if min_val > k:
             continue
 
-        is_optimal_recall = False
-        is_optimal_entropy = False
         opt_recall = OPTIMAL_POINTS[model_name]['recall']
         opt_entropy = OPTIMAL_POINTS[model_name]['entropy']
-
-        if u == opt_recall['u'] and e == opt_recall['e'] and k == opt_recall['k'] and min_val == opt_recall['min'] and threshold == opt_recall['threshold'] and value == opt_recall['value']:
-            is_optimal_recall = True
-        if u == opt_entropy['u'] and e == opt_entropy['e'] and k == opt_entropy['k'] and min_val == opt_entropy['min'] and threshold == opt_entropy['threshold'] and value == opt_entropy['value']:
-            is_optimal_entropy = True
+        is_optimal_recall = (u == opt_recall['u'] and e == opt_recall['e'] and k == opt_recall['k'] and min_val == opt_recall['min'] and threshold == opt_recall['threshold'] and value == opt_recall['value'])
+        is_optimal_entropy = (u == opt_entropy['u'] and e == opt_entropy['e'] and k == opt_entropy['k'] and min_val == opt_entropy['min'] and threshold == opt_entropy['threshold'] and value == opt_entropy['value'])
 
         if not (is_optimal_recall or is_optimal_entropy) and seeded_random(config_index) > 0.05:
-            config_index +=1
+            config_index += 1
             continue
 
         seed = random_seed + config_index * 17
-
         topic_recall = calculate_topic_recall(u, e, k, min_val, threshold, value, model_name, seed)
-        total_entropy = calculate_entropy(u, e, k, min_val, threshold, value, model_name, seed)
 
+        # Base entropy is now dependent on topic recall to create the inverse relationship
+        base_entropy = calculate_base_entropy(topic_recall, model_name, seed)
+
+        entropy_deviation = (seeded_random(seed * 89) - 0.5) * 0.4
+        class_entropy = max(0.3, base_entropy + entropy_deviation)
+        cluster_entropy = max(0.3, base_entropy - entropy_deviation)
+        total_entropy = (class_entropy + cluster_entropy) / 2
+
+        mean_newsworthiness = calculate_mean_newsworthiness(topic_recall, seed)
+        number_of_events = calculate_number_of_events(u, e, k, min_val, threshold, value, model_name)
+
+        # Force the optimal points to their exact target values
         if is_optimal_recall: topic_recall = opt_recall['target']
         if is_optimal_entropy: total_entropy = opt_entropy['target']
+
+        # If this is the optimal entropy point, we also need to adjust the components to match
+        if is_optimal_entropy:
+            # We recalculate the deviation needed to hit the target total_entropy
+            current_average = (class_entropy + cluster_entropy) / 2
+            correction = opt_entropy['target'] - current_average
+            class_entropy += correction
+            cluster_entropy += correction
+
 
         configurations.append({
             'u': u, 'e': e, 'k': k, 'min': min_val, 'threshold': threshold, 'value': value,
             'Topic Recall': f"{topic_recall:.4f}",
-            'Total Entropy': f"{total_entropy:.4f}"
+            'Class Entropy': f"{class_entropy:.4f}",
+            'Cluster Entropy': f"{cluster_entropy:.4f}",
+            'Total Entropy': f"{total_entropy:.4f}",
+            'Mean_Newsworthiness': f"{mean_newsworthiness:.2f}",
+            'NumberOfEvents': number_of_events
         })
         config_index += 1
 
@@ -146,26 +177,17 @@ if __name__ == "__main__":
             df.to_csv(f"{output_dir}/{model}_results.csv", index=False, encoding='utf-8-sig')
             print(f"Successfully saved results for {model}.\n")
 
-    # After generating all model files, calculate and save the correlations.
     correlation_results = []
     print("Calculating correlations between Topic Recall and Total Entropy...")
-
     for model in models_to_generate:
         try:
             filepath = f"{output_dir}/{model}_results.csv"
             df_model = pd.read_csv(filepath)
-
-            # Ensure columns are numeric for correlation calculation
             df_model['Topic Recall'] = pd.to_numeric(df_model['Topic Recall'])
             df_model['Total Entropy'] = pd.to_numeric(df_model['Total Entropy'])
-
             correlation = df_model['Topic Recall'].corr(df_model['Total Entropy'], method='pearson')
-            correlation_results.append({
-                'Model': model,
-                'Pearson_Correlation': f"{correlation:.4f}"
-            })
+            correlation_results.append({'Model': model, 'Pearson_Correlation': f"{correlation:.4f}"})
             print(f"- {model}: {correlation:.4f}")
-
         except FileNotFoundError:
             print(f"Warning: Could not find file {filepath} to calculate correlation.")
         except Exception as e:
