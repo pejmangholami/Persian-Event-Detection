@@ -65,28 +65,15 @@ def calculate_base_entropy(topic_recall, model, seed):
 
 def calculate_mean_newsworthiness(topic_recall, seed):
     """Calculates synthetic Mean Newsworthiness, scaled to the 0.1-0.7 range."""
-    # Base the newsworthiness on recall, but non-linearly.
-    # pow(topic_recall, 2) makes higher recall have a disproportionately higher score.
     recall_effect = pow(topic_recall, 2)
-
-    # Scale the result to the desired range [0.1, 0.7]
-    # The range of recall_effect is roughly [0.3^2, 0.95^2] -> [0.09, 0.9025]
-    # We map this range to [0.1, 0.7]
     min_recall_effect = 0.09
     max_recall_effect = 0.9025
     min_output = 0.1
     max_output = 0.7
-
-    # Linear scaling formula: y = y_min + (x - x_min) * (y_max - y_min) / (x_max - x_min)
     scaled_value = min_output + (recall_effect - min_recall_effect) * (max_output - min_output) / (max_recall_effect - min_recall_effect)
-
-    # Add a small amount of noise
     noise = (seeded_random(seed * 71) - 0.5) * 0.05
     result = scaled_value + noise
-
-    # Clamp the final result to the desired range
     return min(max_output, max(min_output, result))
-
 
 def calculate_number_of_events(u, e, k, min_val, threshold, value, model):
     """Calculates synthetic NumberOfEvents based on distance from optimal parameters."""
@@ -125,11 +112,6 @@ def generate_data_for_model(model_name, random_seed=42):
         is_optimal_recall = (u == opt_recall['u'] and e == opt_recall['e'] and k == opt_recall['k'] and min_val == opt_recall['min'] and threshold == opt_recall['threshold'] and value == opt_recall['value'])
         is_optimal_entropy = (u == opt_entropy['u'] and e == opt_entropy['e'] and k == opt_entropy['k'] and min_val == opt_entropy['min'] and threshold == opt_entropy['threshold'] and value == opt_entropy['value'])
 
-        # This condition has been removed to generate all data points.
-        # if not (is_optimal_recall or is_optimal_entropy) and seeded_random(config_index) > 0.05:
-        #     config_index += 1
-        #     continue
-
         seed = random_seed + config_index * 17
         topic_recall = calculate_topic_recall(u, e, k, min_val, threshold, value, model_name, seed)
         base_entropy = calculate_base_entropy(topic_recall, model_name, seed)
@@ -167,22 +149,25 @@ def generate_data_for_model(model_name, random_seed=42):
 # ==============================================================================
 
 if __name__ == "__main__":
+    # Get the directory where the script is located
+    script_dir = os.path.dirname(os.path.realpath(__file__))
+
     models_to_generate = ["mBERT", "ParsBERT", "Statistical"]
-    output_dir = "Language-Model_Scoring_Parallel_Fast"
-    os.makedirs(output_dir, exist_ok=True)
 
     for model in models_to_generate:
         generated_data = generate_data_for_model(model)
         if generated_data:
             df = pd.DataFrame(generated_data)
-            df.to_csv(f"{output_dir}/{model}_results.csv", index=False, encoding='utf-8-sig')
+            # Save the CSV file in the same directory as the script
+            df.to_csv(os.path.join(script_dir, f"{model}_results.csv"), index=False, encoding='utf-8-sig')
             print(f"Successfully saved results for {model}.\n")
 
     correlation_results = []
     print("Calculating correlations between Topic Recall and Total Entropy...")
     for model in models_to_generate:
         try:
-            filepath = f"{output_dir}/{model}_results.csv"
+            # Read from the same directory as the script
+            filepath = os.path.join(script_dir, f"{model}_results.csv")
             df_model = pd.read_csv(filepath)
             df_model['Topic Recall'] = pd.to_numeric(df_model['Topic Recall'])
             df_model['Total Entropy'] = pd.to_numeric(df_model['Total Entropy'])
@@ -196,6 +181,7 @@ if __name__ == "__main__":
 
     if correlation_results:
         df_corr = pd.DataFrame(correlation_results)
-        corr_filepath = f"{output_dir}/EntropyRecall_correlation.csv"
+        # Save the correlation file in the same directory as the script
+        corr_filepath = os.path.join(script_dir, "EntropyRecall_correlation.csv")
         df_corr.to_csv(corr_filepath, index=False, encoding='utf-8-sig')
         print(f"\nSuccessfully saved correlation results to {corr_filepath}")
