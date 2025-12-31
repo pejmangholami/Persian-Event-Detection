@@ -53,15 +53,52 @@ def calculate_topic_recall(u, e, k, min_val, threshold, value, model, seed):
     result = opt['target'] * distance_effect * u_effect + noise
     return min(0.95, max(0.30, result))
 
-def calculate_base_entropy(topic_recall, model, seed):
-    """Calculates synthetic base entropy to be inversely correlated with Topic Recall."""
-    base_entropy = 1.6
-    recall_effect = pow(topic_recall, 1.5) * 1.2
-    model_tuning = { 'mBERT': -0.1, 'ParsBERT': -0.2, 'Statistical': 0.1 }
-    tuning = model_tuning.get(model, 0)
-    noise = (seeded_random(seed * 53) - 0.5) * 0.05
-    result = base_entropy - recall_effect + tuning + noise
-    return min(2.0, max(0.30, result))
+def calculate_entropy_metrics(topic_recall, current_params, model, seed):
+    """
+    Calculates Class, Cluster, and Total Entropy based on Topic Recall and distance from optimal entropy parameters.
+    This function is designed to achieve specific negative correlations between Topic Recall and Total Entropy,
+    and a dynamic inverse relationship between Class and Cluster Entropy.
+    """
+    # 1. Define model-specific correlation factors to control the relationship with Topic Recall
+    # Higher factor = stronger negative correlation.
+    # These values have been tuned to achieve the user's specific correlation targets.
+    correlation_factors = {
+        'Statistical': 0.12,  # Aiming for -0.01 to -0.15
+        'mBERT': 0.20,        # Aiming for -0.2 to -0.4
+        'ParsBERT': 0.40      # Aiming for -0.4 to -0.5
+    }
+    correlation_factor = correlation_factors.get(model, 0.3)
+
+    # 2. Calculate a base Total Entropy that is inversely correlated with Topic Recall
+    # This forms the core of the correlation.
+    base_entropy = 1.4 - (correlation_factor * topic_recall) + (seeded_random(seed * 53) - 0.5) * 0.2
+
+    # 3. Calculate the distance from the optimal *entropy* parameters
+    opt_entropy_params = OPTIMAL_POINTS[model]['entropy']
+    entropy_distance = calculate_distance(current_params, opt_entropy_params)
+
+    # 4. Create a dynamic deviation based on this distance.
+    # The deviation is larger when far from the optimal entropy point, creating a wider gap
+    # between Class and Cluster Entropy. It's weaker near the optimal point.
+    # Max deviation is set to 1.1, leading to a max difference of 2.2 between Class and Cluster.
+    max_deviation = 1.1
+    # The deviation strength is scaled by distance. The pow(..., 0.7) creates a curve
+    # where the effect grows sub-linearly with distance. Capped at a max distance of 35.
+    deviation_strength = min(1.0, pow(entropy_distance / 35, 0.7))
+    deviation = max_deviation * deviation_strength
+
+    # 5. Calculate final Class and Cluster entropies with the deviation and some noise
+    class_entropy = base_entropy + deviation + (seeded_random(seed * 89) - 0.5) * 0.05
+    cluster_entropy = base_entropy - deviation + (seeded_random(seed * 97) - 0.5) * 0.05
+
+    # Ensure entropies don't fall below a minimum threshold
+    class_entropy = max(0.1, class_entropy)
+    cluster_entropy = max(0.1, cluster_entropy)
+
+    # 6. The final Total Entropy is the average of the two.
+    total_entropy = (class_entropy + cluster_entropy) / 2
+
+    return class_entropy, cluster_entropy, total_entropy
 
 def calculate_mean_newsworthiness(topic_recall, seed):
     """Calculates synthetic Mean Newsworthiness, scaled to the 0.1-0.7 range."""
@@ -113,12 +150,11 @@ def generate_data_for_model(model_name, random_seed=42):
         is_optimal_entropy = (u == opt_entropy['u'] and e == opt_entropy['e'] and k == opt_entropy['k'] and min_val == opt_entropy['min'] and threshold == opt_entropy['threshold'] and value == opt_entropy['value'])
 
         seed = random_seed + config_index * 17
+        current_params = {'u': u, 'e': e, 'k': k, 'min': min_val, 'threshold': threshold, 'value': value}
         topic_recall = calculate_topic_recall(u, e, k, min_val, threshold, value, model_name, seed)
-        base_entropy = calculate_base_entropy(topic_recall, model_name, seed)
-        entropy_deviation = (seeded_random(seed * 89) - 0.5) * 0.4
-        class_entropy = max(0.3, base_entropy + entropy_deviation)
-        cluster_entropy = max(0.3, base_entropy - entropy_deviation)
-        total_entropy = (class_entropy + cluster_entropy) / 2
+
+        class_entropy, cluster_entropy, total_entropy = calculate_entropy_metrics(topic_recall, current_params, model_name, seed)
+
         mean_newsworthiness = calculate_mean_newsworthiness(topic_recall, seed)
         number_of_events = calculate_number_of_events(u, e, k, min_val, threshold, value, model_name)
 
